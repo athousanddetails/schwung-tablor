@@ -29,3 +29,10 @@ add_executable(tablor_loadtest tools/loadtest.cpp)
 target_include_directories(tablor_loadtest PRIVATE src src/dsp src/host)
 target_link_libraries(tablor_loadtest PRIVATE dl m)
 target_link_options(tablor_loadtest PRIVATE ${TB_STATIC_LINK})
+
+# Phase 1 benchmark: mip build validation + realtime factor ON the Move.
+# The go/no-go for the voice/unison budget.
+add_executable(tablor_bench tools/bench.cpp src/ported/wavetable.cpp)
+target_include_directories(tablor_bench PRIVATE src src/ported)
+target_link_libraries(tablor_bench PRIVATE m)
+target_link_options(tablor_bench PRIVATE ${TB_STATIC_LINK})
