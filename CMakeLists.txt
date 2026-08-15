@@ -17,8 +17,12 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(TB_STATIC_LINK -static-libstdc++ -static-libgcc)
 
 # The Move module: dlopen'd by Schwung's chain host as dsp.so
-add_library(tablor SHARED src/dsp/tablor_plugin.cpp)
-target_include_directories(tablor PRIVATE src src/dsp src/host)
+add_library(tablor SHARED
+    src/dsp/tablor_plugin.cpp
+    src/dsp/engine.cpp
+    src/ported/wavetable.cpp
+    src/ported/audiofilter/ParametricCreator.cpp)
+target_include_directories(tablor PRIVATE src src/dsp src/host src/ported)
 target_link_libraries(tablor PRIVATE m)
 target_link_options(tablor PRIVATE ${TB_STATIC_LINK})
 set_target_properties(tablor PROPERTIES OUTPUT_NAME "dsp" PREFIX "" SUFFIX ".so")
@@ -45,3 +49,11 @@ add_executable(tablor_test tests/test_dsp.cpp
 target_include_directories(tablor_test PRIVATE src src/ported)
 target_link_libraries(tablor_test PRIVATE m)
 target_link_options(tablor_test PRIVATE ${TB_STATIC_LINK})
+
+# Full-engine CPU check (run on the Move).
+add_executable(tablor_enginebench tools/enginebench.cpp
+               src/dsp/engine.cpp src/ported/wavetable.cpp
+               src/ported/audiofilter/ParametricCreator.cpp)
+target_include_directories(tablor_enginebench PRIVATE src src/ported src/dsp)
+target_link_libraries(tablor_enginebench PRIVATE m)
+target_link_options(tablor_enginebench PRIVATE ${TB_STATIC_LINK})

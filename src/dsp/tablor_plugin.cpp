@@ -1,8 +1,7 @@
 /* Tablor — 2-osc wavetable synth for Ableton Move (Schwung module).
  *
- * Phase 0: plugin_api_v2 shell. Full parameter surface (store/echo), dynamic
- * chain_params, version-tagged state round-trip — and silence out. The DSP
- * engine lands in phases 1–4.
+ * plugin_api_v2. Parameter surface + version-tagged state round-trip +
+ * the phase 3 engine: 8 voices, poly/mono, glide, mod matrix.
  *
  * Realtime rules (docs/REALTIME_SAFETY.md): render_block never allocates,
  * never touches the filesystem, never logs.
@@ -13,9 +12,11 @@
 #include <cstring>
 #include <cmath>
 #include <cstdint>
+#include <new>
 
 #include "../host/plugin_api_v1.h"
 #include "params.h"
+#include "engine.h"
 
 static const host_api_v1_t *g_host = nullptr;
 
@@ -23,12 +24,12 @@ static const host_api_v1_t *g_host = nullptr;
 /* Instance                                                            */
 /* ------------------------------------------------------------------ */
 
-/* Phase 0: no scanner yet — every dynamic enum has this one option. */
+/* Phase 4 replaces this with the wavetable scanner's list. */
 static const char *const k_dyn_placeholder[] = { "Init" };
 
 struct tablor_instance {
-    float params[TB_PARAM_COUNT];          /* enums store the option index */
-    char  module_dir[512];
+    tb::Engine engine;
+    char  module_dir[512] = {};
 
     /* chain_params JSON is assembled once per request into this buffer.
      * fmt is ~13 KB; dynamic option lists will add table names later. */
@@ -36,6 +37,8 @@ struct tablor_instance {
 
     /* state blob scratch */
     char  state_buf[8 * 1024];
+
+    float *params() { return engine.pots; }
 };
 
 static int param_index(const char *key)
@@ -100,11 +103,12 @@ static void tb_set_param(void *instance, const char *key, const char *val)
                 memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
                 int idx = param_index(kbuf);
                 if (idx >= 0)
-                    inst->params[idx] = clamp_param(&tb_params[idx],
+                    inst->params()[idx] = clamp_param(&tb_params[idx],
                                                     strtof(vbuf, nullptr), inst, idx);
             }
             p = (*semi) ? semi + 1 : semi;
         }
+        inst->engine.syncModSlots();
         return;
     }
 
@@ -137,7 +141,11 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         v = strtof(val, nullptr);
     }
 
-    inst->params[idx] = clamp_param(p, v, inst, idx);
+    inst->params()[idx] = clamp_param(p, v, inst, idx);
+
+    /* keep the engine's mod-slot cache in step (cheap: 32 reads) */
+    if (k[0] == 'm' && k[1] >= '1' && k[1] <= '8')
+        inst->engine.syncModSlots();
 }
 
 static int write_str(char *buf, int buf_len, const char *s)
@@ -171,10 +179,10 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         char def1[136], def2[136];
         snprintf(def1, sizeof def1, "\"%s\"",
                  dyn_option_name(inst, TB_P_WT1_TABLE,
-                                 (int) inst->params[TB_P_WT1_TABLE]));
+                                 (int) inst->params()[TB_P_WT1_TABLE]));
         snprintf(def2, sizeof def2, "\"%s\"",
                  dyn_option_name(inst, TB_P_WT2_TABLE,
-                                 (int) inst->params[TB_P_WT2_TABLE]));
+                                 (int) inst->params()[TB_P_WT2_TABLE]));
 
         int len = snprintf(inst->chain_buf, sizeof inst->chain_buf,
                            tb_chain_params_fmt, opts, def1, opts, def2);
@@ -185,7 +193,7 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "state")) {
         int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
         for (int i = 0; i < TB_PARAM_COUNT; i++) {
-            float v = inst->params[i];
+            float v = inst->params()[i];
             if (v == tb_params[i].def) continue;        /* defaults are implicit */
             o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o,
                           "%s=%g;", tb_params[i].key, (double) v);
@@ -200,12 +208,12 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     if (p->type == TB_ENUM) {
         const char *name = (p->n_options > 0)
-            ? p->options[(int) inst->params[idx]]
-            : dyn_option_name(inst, idx, (int) inst->params[idx]);
+            ? p->options[(int) inst->params()[idx]]
+            : dyn_option_name(inst, idx, (int) inst->params()[idx]);
         return write_str(buf, buf_len, name ? name : "?");
     }
     char tmp[32];
-    snprintf(tmp, sizeof tmp, "%g", (double) inst->params[idx]);
+    snprintf(tmp, sizeof tmp, "%g", (double) inst->params()[idx]);
     return write_str(buf, buf_len, tmp);
 }
 
@@ -215,14 +223,23 @@ static int tb_get_error(void *, char *, int) { return 0; }
 /* MIDI + audio                                                        */
 /* ------------------------------------------------------------------ */
 
-static void tb_on_midi(void *, const uint8_t *, int, int)
+static void tb_on_midi(void *instance, const uint8_t *msg, int len, int /*source*/)
 {
-    /* Phase 3: note handling. */
+    auto *inst = (tablor_instance *) instance;
+    if (inst && msg)
+        inst->engine.onMidi(msg, len);
 }
 
-static void tb_render_block(void *, int16_t *out_lr, int frames)
+static void tb_render_block(void *instance, int16_t *out_lr, int frames)
 {
-    memset(out_lr, 0, (size_t) frames * 2 * sizeof(int16_t));
+    auto *inst = (tablor_instance *) instance;
+    if (!inst) {
+        memset(out_lr, 0, (size_t) frames * 2 * sizeof(int16_t));
+        return;
+    }
+    if (g_host && g_host->get_bpm)
+        inst->engine.setHostBpm(g_host->get_bpm());
+    inst->engine.renderBlock(out_lr, frames);
 }
 
 /* ------------------------------------------------------------------ */
@@ -232,14 +249,11 @@ static void tb_render_block(void *, int16_t *out_lr, int frames)
 static void *tb_create_instance(const char *module_dir, const char *json_defaults)
 {
     (void) json_defaults;
-    auto *inst = (tablor_instance *) calloc(1, sizeof(tablor_instance));
+    auto *inst = new (std::nothrow) tablor_instance();
     if (!inst) return nullptr;
 
     if (module_dir)
         snprintf(inst->module_dir, sizeof inst->module_dir, "%s", module_dir);
-
-    for (int i = 0; i < TB_PARAM_COUNT; i++)
-        inst->params[i] = tb_params[i].def;
 
     if (g_host && g_host->log)
         g_host->log("tablor: instance created (v" TB_VERSION ")");
@@ -248,7 +262,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
 
 static void tb_destroy_instance(void *instance)
 {
-    free(instance);
+    delete (tablor_instance *) instance;
 }
 
 static plugin_api_v2_t g_api = {

@@ -109,24 +109,88 @@ int main(int argc, char **argv)
     api->get_param(inst, "vca_r", buf, sizeof buf);
     CHECK(!strcmp(buf, "10"), "untagged blob fully ignored -> vca_r=\"%s\"", buf);
 
-    /* ---- render: silence, no crash, many blocks ---- */
+    /* ---- render: silence before any note ---- */
     int16_t out[MOVE_FRAMES_PER_BLOCK * 2];
     memset(out, 0x55, sizeof out);
     long acc = 0;
-    for (int b = 0; b < 2000; b++) {                    /* ~5.8 s of audio */
+    for (int b = 0; b < 200; b++) {
         api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
         for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++)
             acc += out[i] < 0 ? -out[i] : out[i];
     }
-    CHECK(acc == 0, "2000 blocks rendered, all silence (acc=%ld)", acc);
+    CHECK(acc == 0, "silence before any note (acc=%ld)", acc);
 
-    /* ---- midi doesn't crash ---- */
+    /* ---- note on -> SOUND (the engine gate), note off -> decay to zero */
     const uint8_t note_on[]  = { 0x90, 60, 100 };
     const uint8_t note_off[] = { 0x80, 60, 0 };
     api->on_midi(inst, note_on, 3, 0);
-    api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+    long peak = 0;
+    for (int b = 0; b < 200; b++) {                     /* ~0.6 s held */
+        api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
+            long v = out[i] < 0 ? -out[i] : out[i];
+            if (v > peak) peak = v;
+        }
+    }
+    CHECK(peak > 2000, "note 60 makes sound (peak %ld of 32767)", peak);
+    CHECK(peak < 32767, "not clipping at defaults (peak %ld)", peak);
+
+    /* chord: 4 more notes, still sane */
+    const uint8_t chordNotes[4] = { 48, 64, 67, 72 };
+    for (int ci = 0; ci < 4; ci++) {
+        const uint8_t on[] = { 0x90, chordNotes[ci], 100 };
+        api->on_midi(inst, on, 3, 0);
+    }
+    long chordPeak = 0;
+    for (int b = 0; b < 200; b++) {
+        api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
+            long v = out[i] < 0 ? -out[i] : out[i];
+            if (v > chordPeak) chordPeak = v;
+        }
+    }
+    CHECK(chordPeak > peak, "chord is louder than one note (%ld > %ld)", chordPeak, peak);
+
     api->on_midi(inst, note_off, 3, 0);
-    CHECK(1, "midi note on/off survived");
+    const uint8_t all_off[] = { 0xB0, 123, 0 };
+    api->on_midi(inst, all_off, 3, 0);
+    long tail = 0;
+    for (int b = 0; b < 600; b++) {                     /* ~1.7 s of release */
+        api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        if (b > 500) {
+            for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++)
+                tail += out[i] < 0 ? -out[i] : out[i];
+        }
+    }
+    CHECK(tail == 0, "all-notes-off decays to true silence (tail acc=%ld)", tail);
+
+    /* filter audibly filters: closed lowpass must be quieter than open */
+    api->set_param(inst, "flt_type", "LP 24");          /* enum tests left BP 12 */
+    api->set_param(inst, "flt_freq", "127");
+    api->on_midi(inst, note_on, 3, 0);
+    long openPeak = 0;
+    for (int b = 0; b < 120; b++) {
+        api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
+            long v = out[i] < 0 ? -out[i] : out[i];
+            if (v > openPeak) openPeak = v;
+        }
+    }
+    api->set_param(inst, "flt_freq", "20");             /* slam it shut */
+    for (int b = 0; b < 30; b++)                        /* let the SVF settle */
+        api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+    long closedPeak = 0;
+    for (int b = 0; b < 120; b++) {
+        api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
+            long v = out[i] < 0 ? -out[i] : out[i];
+            if (v > closedPeak) closedPeak = v;
+        }
+    }
+    CHECK(closedPeak < openPeak / 3,
+          "closing the filter quiets the note (%ld -> %ld)", openPeak, closedPeak);
+    api->on_midi(inst, all_off, 3, 0);
+    api->set_param(inst, "flt_freq", "127");
 
     api->destroy_instance(inst);
     dlclose(dl);
