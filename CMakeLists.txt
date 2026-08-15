@@ -20,10 +20,11 @@ set(TB_STATIC_LINK -static-libstdc++ -static-libgcc)
 add_library(tablor SHARED
     src/dsp/tablor_plugin.cpp
     src/dsp/engine.cpp
+    src/dsp/wt/loader.cpp
     src/ported/wavetable.cpp
     src/ported/audiofilter/ParametricCreator.cpp)
 target_include_directories(tablor PRIVATE src src/dsp src/host src/ported)
-target_link_libraries(tablor PRIVATE m)
+target_link_libraries(tablor PRIVATE m pthread)
 target_link_options(tablor PRIVATE ${TB_STATIC_LINK})
 set_target_properties(tablor PROPERTIES OUTPUT_NAME "dsp" PREFIX "" SUFFIX ".so")
 

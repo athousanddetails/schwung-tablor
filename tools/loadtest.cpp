@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <dlfcn.h>
+#include <ctime>
 
 #include "../src/host/plugin_api_v1.h"
 
@@ -191,6 +192,54 @@ int main(int argc, char **argv)
           "closing the filter quiets the note (%ld -> %ld)", openPeak, closedPeak);
     api->on_midi(inst, all_off, 3, 0);
     api->set_param(inst, "flt_freq", "127");
+
+    /* ---- phase 4: wavetable list + mid-note switching ---- */
+    n = api->get_param(inst, "chain_params", big, sizeof big);
+    CHECK(n > 1000 && strstr(big, "Adventure Kid/") && strstr(big, "Neu KatalYst/"),
+          "chain_params lists factory packs (%d bytes)", n);
+
+    api->set_param(inst, "wt1_table", "Adventure Kid/AKWP 0001");
+    api->get_param(inst, "wt1_table", buf, sizeof buf);
+    CHECK(!strcmp(buf, "Adventure Kid/AKWP 0001"),
+          "wt1 select by name -> \"%s\"", buf);
+
+    api->on_midi(inst, note_on, 3, 0);
+    struct timespec ts = { 0, 50 * 1000000 };
+    long swPeak = 0, swMin = 1 << 30;
+    const char *cycle[4] = { "Neu KatalYst/NK - ACTIVE", "Init",
+                             "Adventure Kid/AKWP 0042", "Neu KatalYst/NK - AGE" };
+    for (int s = 0; s < 4; s++) {                       /* switch WHILE held */
+        api->set_param(inst, "wt1_table", cycle[s]);
+        for (int b = 0; b < 60; b++) {                  /* ~175 ms per table */
+            api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+            long p = 0;
+            for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
+                long v = out[i] < 0 ? -out[i] : out[i];
+                if (v > p) p = v;
+            }
+            if (p > swPeak) swPeak = p;
+            if (b > 20 && p < swMin) swMin = p;         /* after load settles */
+        }
+        nanosleep(&ts, nullptr);
+    }
+    CHECK(swPeak > 1500 && swMin > 200,
+          "sound continuous across 4 mid-note table switches (peak %ld, min %ld)",
+          swPeak, swMin);
+    api->get_param(inst, "wt1_table", buf, sizeof buf);
+    CHECK(!strcmp(buf, "Neu KatalYst/NK - AGE"), "landed on \"%s\"", buf);
+
+    /* state stores the table by NAME and restores it */
+    n = api->get_param(inst, "state", big, sizeof big);
+    CHECK(strstr(big, "wt1_table_name=Neu KatalYst/NK - AGE;") != nullptr,
+          "state carries table name");
+    memcpy(saved, big, sizeof big);
+    api->set_param(inst, "wt1_table", "Init");
+    api->set_param(inst, "synth:state", saved);
+    api->get_param(inst, "wt1_table", buf, sizeof buf);
+    CHECK(!strcmp(buf, "Neu KatalYst/NK - AGE"), "state restores table by name");
+
+    api->on_midi(inst, all_off, 3, 0);
+    api->set_param(inst, "wt1_table", "Init");
 
     api->destroy_instance(inst);
     dlclose(dl);

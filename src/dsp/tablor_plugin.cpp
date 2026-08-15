@@ -17,6 +17,8 @@
 #include "../host/plugin_api_v1.h"
 #include "params.h"
 #include "engine.h"
+#include "wt/scanner.h"
+#include "wt/loader.h"
 
 static const host_api_v1_t *g_host = nullptr;
 
@@ -24,16 +26,16 @@ static const host_api_v1_t *g_host = nullptr;
 /* Instance                                                            */
 /* ------------------------------------------------------------------ */
 
-/* Phase 4 replaces this with the wavetable scanner's list. */
-static const char *const k_dyn_placeholder[] = { "Init" };
-
 struct tablor_instance {
     tb::Engine engine;
+    tb::WtScanner scanner;
+    tb::WtLoader loader { engine };
     char  module_dir[512] = {};
 
-    /* chain_params JSON is assembled once per request into this buffer.
-     * fmt is ~13 KB; dynamic option lists will add table names later. */
-    char  chain_buf[48 * 1024];
+    /* chain_params JSON is assembled once per request into this buffer;
+     * options lists (the scanned table names) build in opts_buf. */
+    char  chain_buf[96 * 1024];
+    char  opts_buf[64 * 1024];
 
     /* state blob scratch */
     char  state_buf[8 * 1024];
@@ -49,15 +51,25 @@ static int param_index(const char *key)
     return -1;
 }
 
-/* Dynamic enum option table (wavetables). Phase 4 replaces this with the
- * scanner's list; everything already routes through these two calls. */
-static int dyn_option_count(const tablor_instance *, int /*param*/)
+/* Dynamic enum options (the wavetable list) come from the scanner. */
+static int dyn_option_count(const tablor_instance *inst, int /*param*/)
 {
-    return 1;
+    return (int) inst->scanner.list().size();
 }
-static const char *dyn_option_name(const tablor_instance *, int /*param*/, int idx)
+static const char *dyn_option_name(const tablor_instance *inst, int /*param*/, int idx)
 {
-    return (idx == 0) ? k_dyn_placeholder[0] : nullptr;
+    const auto &l = inst->scanner.list();
+    if (idx < 0 || idx >= (int) l.size()) return nullptr;
+    return l[(size_t) idx].name.c_str();
+}
+
+/* Post a background load for the table the pot now points at. */
+static void request_table(tablor_instance *inst, int osc)
+{
+    int idx = (int) inst->params()[osc == 0 ? TB_P_WT1_TABLE : TB_P_WT2_TABLE];
+    const auto &l = inst->scanner.list();
+    if (idx >= 0 && idx < (int) l.size())
+        inst->loader.requestLoad(osc, l[(size_t) idx]);
 }
 
 static float clamp_param(const tb_param_t *p, float v, const tablor_instance *inst, int idx)
@@ -101,14 +113,23 @@ static void tb_set_param(void *instance, const char *key, const char *val)
             if (kl < sizeof kbuf && vl < sizeof vbuf) {
                 memcpy(kbuf, p, kl); kbuf[kl] = 0;
                 memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
-                int idx = param_index(kbuf);
-                if (idx >= 0)
-                    inst->params()[idx] = clamp_param(&tb_params[idx],
-                                                    strtof(vbuf, nullptr), inst, idx);
+                if (!strcmp(kbuf, "wt1_table_name") || !strcmp(kbuf, "wt2_table_name")) {
+                    int osc = kbuf[2] == '1' ? 0 : 1;
+                    int ti = inst->scanner.indexOfName(vbuf);
+                    inst->params()[osc == 0 ? TB_P_WT1_TABLE : TB_P_WT2_TABLE] =
+                        (float) (ti >= 0 ? ti : 0);
+                } else {
+                    int idx = param_index(kbuf);
+                    if (idx >= 0)
+                        inst->params()[idx] = clamp_param(&tb_params[idx],
+                                                        strtof(vbuf, nullptr), inst, idx);
+                }
             }
             p = (*semi) ? semi + 1 : semi;
         }
         inst->engine.syncModSlots();
+        request_table(inst, 0);
+        request_table(inst, 1);
         return;
     }
 
@@ -146,6 +167,31 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     /* keep the engine's mod-slot cache in step (cheap: 32 reads) */
     if (k[0] == 'm' && k[1] >= '1' && k[1] <= '8')
         inst->engine.syncModSlots();
+
+    /* wavetable selection -> background load + swap */
+    if (idx == TB_P_WT1_TABLE) request_table(inst, 0);
+    if (idx == TB_P_WT2_TABLE) request_table(inst, 1);
+
+    /* rescan trigger: re-list the folders, keep current selections by name */
+    if (idx == TB_P_WT_RESCAN && inst->params()[idx] > 0.5f) {
+        char n1[256] = {}, n2[256] = {};
+        const char *c1 = dyn_option_name(inst, TB_P_WT1_TABLE,
+                                         (int) inst->params()[TB_P_WT1_TABLE]);
+        const char *c2 = dyn_option_name(inst, TB_P_WT2_TABLE,
+                                         (int) inst->params()[TB_P_WT2_TABLE]);
+        if (c1) snprintf(n1, sizeof n1, "%s", c1);
+        if (c2) snprintf(n2, sizeof n2, "%s", c2);
+
+        inst->scanner.scan(inst->module_dir);
+
+        int i1 = inst->scanner.indexOfName(n1);
+        int i2 = inst->scanner.indexOfName(n2);
+        inst->params()[TB_P_WT1_TABLE] = (float) (i1 >= 0 ? i1 : 0);
+        inst->params()[TB_P_WT2_TABLE] = (float) (i2 >= 0 ? i2 : 0);
+        inst->params()[TB_P_WT_RESCAN] = 0.0f;      /* trigger re-arms */
+        request_table(inst, 0);
+        request_table(inst, 1);
+    }
 }
 
 static int write_str(char *buf, int buf_len, const char *s)
@@ -163,20 +209,25 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!inst || !key || !buf || buf_len <= 1) return -1;
 
     if (!strcmp(key, "chain_params")) {
-        /* Assemble the dynamic option lists as JSON arrays. Phase 4: the
-         * scanner's table names go here. */
-        char opts[40 * 1024];
+        /* Assemble the scanned table names as a JSON string array. */
+        char *opts = inst->opts_buf;
+        const size_t optsCap = sizeof inst->opts_buf;
         int  n = dyn_option_count(inst, TB_P_WT1_TABLE);
-        int  o = 0;
+        size_t o = 0;
         opts[o++] = '[';
-        for (int i = 0; i < n && o < (int) sizeof opts - 64; i++) {
+        for (int i = 0; i < n && o < optsCap - 8; i++) {
             if (i) opts[o++] = ',';
-            o += snprintf(opts + o, sizeof opts - (size_t) o, "\"%s\"",
-                          dyn_option_name(inst, TB_P_WT1_TABLE, i));
+            opts[o++] = '"';
+            for (const char *s = dyn_option_name(inst, TB_P_WT1_TABLE, i);
+                 s && *s && o < optsCap - 8; s++) {
+                if (*s == '"' || *s == '\\') opts[o++] = '\\';
+                opts[o++] = *s;
+            }
+            opts[o++] = '"';
         }
         opts[o++] = ']'; opts[o] = 0;
 
-        char def1[136], def2[136];
+        char def1[264], def2[264];
         snprintf(def1, sizeof def1, "\"%s\"",
                  dyn_option_name(inst, TB_P_WT1_TABLE,
                                  (int) inst->params()[TB_P_WT1_TABLE]));
@@ -193,12 +244,22 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "state")) {
         int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
         for (int i = 0; i < TB_PARAM_COUNT; i++) {
+            if (tb_params[i].n_options == -1) continue; /* tables: by name below */
             float v = inst->params()[i];
             if (v == tb_params[i].def) continue;        /* defaults are implicit */
             o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o,
                           "%s=%g;", tb_params[i].key, (double) v);
             if (o >= (int) sizeof inst->state_buf - 64) break;
         }
+        /* wavetable selections are stored BY NAME — indexes shift when the
+         * user adds files, names don't. */
+        const char *n1 = dyn_option_name(inst, TB_P_WT1_TABLE,
+                                         (int) inst->params()[TB_P_WT1_TABLE]);
+        const char *n2 = dyn_option_name(inst, TB_P_WT2_TABLE,
+                                         (int) inst->params()[TB_P_WT2_TABLE]);
+        o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o,
+                      "wt1_table_name=%s;wt2_table_name=%s;",
+                      n1 ? n1 : "Init", n2 ? n2 : "Init");
         return write_str(buf, buf_len, inst->state_buf);
     }
 
@@ -255,8 +316,14 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
     if (module_dir)
         snprintf(inst->module_dir, sizeof inst->module_dir, "%s", module_dir);
 
-    if (g_host && g_host->log)
-        g_host->log("tablor: instance created (v" TB_VERSION ")");
+    inst->scanner.scan(inst->module_dir);
+
+    if (g_host && g_host->log) {
+        char msg[128];
+        snprintf(msg, sizeof msg, "tablor: v" TB_VERSION ", %d wavetables found",
+                 (int) inst->scanner.list().size());
+        g_host->log(msg);
+    }
     return inst;
 }
 

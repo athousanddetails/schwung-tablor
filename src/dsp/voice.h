@@ -162,6 +162,13 @@ public:
     void render(const VoiceContext &c, float *outL, float *outR, int n)
     {
         if (!active) return;
+
+        /* Re-point at the context's tables every block: the loader may have
+         * swapped them since noteStarted, and the block's shared_ptr is the
+         * only thing keeping a table alive. A held raw pointer would dangle. */
+        osc1.setWavetable(c.table1);
+        osc2.setWavetable(c.table2);
+
         updateParams(c, n);
 
         float preL[kBlock] = {}, preR[kBlock] = {};
