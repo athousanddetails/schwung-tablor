@@ -236,11 +236,11 @@ This is the headline feature, so it gets the design attention:
   travels.
 - A `type: 'file'` browser lives on a secondary row for loading from anywhere.
 
-**Directories scanned:** the module's own `wavetables/` (Surge already ships a
-`wavetables/` dir on your device, so the precedent exists) plus a user directory
-under `/data/UserData/UserLibrary/Samples/` — which is what Move Manager writes
-into, so "upload via Move Manager, appears in the list" works with no extra
-machinery. A rescan action re-reads it without a reboot.
+**Directories scanned:** the module's own `wavetables/` (factory packs) plus
+`/data/UserData/UserLibrary/Wavetables/` — Gus's choice; the module creates it
+on first run, and both Move Manager and schwung-manager's file browser can drop
+files there. A `Rescan Tables` trigger on the Global page re-reads it without a
+reboot, and selections are stored by *name* so they survive the list shifting.
 
 ### 5.3 Factory tables — two of the seven packs are shippable
 

@@ -5,6 +5,7 @@ set -euo pipefail
 TARGET="${1:-all}"
 
 python3 tools/gen_params.py
+python3 tools/check_config.py
 
 # ---- Native DSP tests: compile and RUN in-container before cross-compiling.
 # A red test here fails the whole build.
