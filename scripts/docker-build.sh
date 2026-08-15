@@ -6,6 +6,16 @@ TARGET="${1:-all}"
 
 python3 tools/gen_params.py
 
+# ---- Native DSP tests: compile and RUN in-container before cross-compiling.
+# A red test here fails the whole build.
+echo "=== native DSP tests ==="
+mkdir -p build-native
+g++ -O2 -std=c++17 -Wall \
+    tests/test_dsp.cpp src/ported/wavetable.cpp \
+    src/ported/audiofilter/ParametricCreator.cpp \
+    -Isrc -Isrc/ported -o build-native/tablor_test -lm
+./build-native/tablor_test
+
 cmake -B build -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-toolchain.cmake \
     -DCMAKE_BUILD_TYPE=Release

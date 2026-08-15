@@ -36,3 +36,12 @@ add_executable(tablor_bench tools/bench.cpp src/ported/wavetable.cpp)
 target_include_directories(tablor_bench PRIVATE src src/ported)
 target_link_libraries(tablor_bench PRIVATE m)
 target_link_options(tablor_bench PRIVATE ${TB_STATIC_LINK})
+
+# Phase 2 DSP validation: numeric golden checks for every ported block.
+# Built both natively (in-container, run at build time) and cross for the Move.
+add_executable(tablor_test tests/test_dsp.cpp
+               src/ported/wavetable.cpp
+               src/ported/audiofilter/ParametricCreator.cpp)
+target_include_directories(tablor_test PRIVATE src src/ported)
+target_link_libraries(tablor_test PRIVATE m)
+target_link_options(tablor_test PRIVATE ${TB_STATIC_LINK})
