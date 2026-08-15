@@ -29,15 +29,30 @@ class WtScanner {
 public:
     static constexpr const char *kUserDir = "/data/UserData/UserLibrary/Wavetables";
 
-    void scan(const std::string &moduleDir)
+    /* One-time: copy the module's factory packs into the USER folder, so the
+     * user sees and manages everything in one place (Move Manager /
+     * schwung-manager both browse it). A marker file means "already seeded":
+     * a user who deletes a factory pack stays rid of it on reinstall. */
+    static void seedUserFolder(const std::string &moduleDir)
+    {
+        ::mkdir(kUserDir, 0755);
+        std::string marker = std::string(kUserDir) + "/.tablor-seeded";
+        struct stat st;
+        if (::stat(marker.c_str(), &st) == 0) return;
+        if (moduleDir.empty()) return;
+
+        copyTree(moduleDir + "/wavetables", kUserDir);
+
+        FILE *f = ::fopen(marker.c_str(), "w");
+        if (f) { ::fputs("v1\n", f); ::fclose(f); }
+    }
+
+    void scan()
     {
         entries.clear();
         entries.push_back({ "Init", "", 0 });
 
-        if (!moduleDir.empty())
-            scanDir(moduleDir + "/wavetables", "", 0);
-
-        ::mkdir(kUserDir, 0755);   /* first run: create the drop folder */
+        ::mkdir(kUserDir, 0755);
         scanDir(kUserDir, "", 0);
 
         /* keep Init first, sort the rest by name */
@@ -56,6 +71,36 @@ public:
     }
 
 private:
+    static void copyTree(const std::string &from, const std::string &to)
+    {
+        DIR *d = ::opendir(from.c_str());
+        if (!d) return;
+        while (dirent *e = ::readdir(d)) {
+            if (e->d_name[0] == '.') continue;
+            std::string src = from + "/" + e->d_name;
+            std::string dst = to + "/" + e->d_name;
+            struct stat st;
+            if (::stat(src.c_str(), &st) != 0) continue;
+            if (S_ISDIR(st.st_mode)) {
+                ::mkdir(dst.c_str(), 0755);
+                copyTree(src, dst);
+            } else if (::stat(dst.c_str(), &st) != 0) {   /* don't overwrite */
+                FILE *in = ::fopen(src.c_str(), "rb");
+                if (!in) continue;
+                FILE *out = ::fopen(dst.c_str(), "wb");
+                if (out) {
+                    char buf[64 * 1024];
+                    size_t n;
+                    while ((n = ::fread(buf, 1, sizeof buf, in)) > 0)
+                        ::fwrite(buf, 1, n, out);
+                    ::fclose(out);
+                }
+                ::fclose(in);
+            }
+        }
+        ::closedir(d);
+    }
+
     void scanDir(const std::string &dir, const std::string &prefix, int depth)
     {
         if (depth > 3) return;                     /* sanity bound */

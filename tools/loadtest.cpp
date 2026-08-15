@@ -193,10 +193,18 @@ int main(int argc, char **argv)
     api->on_midi(inst, all_off, 3, 0);
     api->set_param(inst, "flt_freq", "127");
 
-    /* ---- phase 4: wavetable list + mid-note switching ---- */
+    /* ---- ui_hierarchy: the Shadow UI needs this to render ANYTHING ---- */
+    n = api->get_param(inst, "ui_hierarchy", big, sizeof big);
+    CHECK(n > 1000 && strstr(big, "\"levels\"") && strstr(big, "\"root\""),
+          "ui_hierarchy served (%d bytes)", n);
+    CHECK(strstr(big, "\"lfo3\"") && strstr(big, "\"global\"") &&
+          strstr(big, "\"mod78\""), "hierarchy has all section levels");
+
+    /* ---- phase 4: wavetable list + mid-note switching ----
+     * Factory packs are seeded into the USER folder on first run. */
     n = api->get_param(inst, "chain_params", big, sizeof big);
     CHECK(n > 1000 && strstr(big, "Adventure Kid/") && strstr(big, "Neu KatalYst/"),
-          "chain_params lists factory packs (%d bytes)", n);
+          "chain_params lists factory packs from user folder (%d bytes)", n);
 
     api->set_param(inst, "wt1_table", "Adventure Kid/AKWP 0001");
     api->get_param(inst, "wt1_table", buf, sizeof buf);

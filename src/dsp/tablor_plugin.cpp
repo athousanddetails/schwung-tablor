@@ -182,7 +182,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         if (c1) snprintf(n1, sizeof n1, "%s", c1);
         if (c2) snprintf(n2, sizeof n2, "%s", c2);
 
-        inst->scanner.scan(inst->module_dir);
+        inst->scanner.scan();
 
         int i1 = inst->scanner.indexOfName(n1);
         int i2 = inst->scanner.indexOfName(n2);
@@ -240,6 +240,9 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         if (len < 0 || len >= (int) sizeof inst->chain_buf) return -1;
         return write_str(buf, buf_len, inst->chain_buf);
     }
+
+    if (!strcmp(key, "ui_hierarchy"))
+        return write_str(buf, buf_len, tb_ui_hierarchy_json);
 
     if (!strcmp(key, "state")) {
         int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
@@ -316,7 +319,8 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
     if (module_dir)
         snprintf(inst->module_dir, sizeof inst->module_dir, "%s", module_dir);
 
-    inst->scanner.scan(inst->module_dir);
+    tb::WtScanner::seedUserFolder(inst->module_dir);
+    inst->scanner.scan();
 
     if (g_host && g_host->log) {
         char msg[128];

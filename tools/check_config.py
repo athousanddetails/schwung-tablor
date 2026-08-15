@@ -83,6 +83,44 @@ if m:
                     check(s["type"] == chain_types[s["key"]],
                           f"{s['key']}: movy type {s['type']} != chain {chain_types[s['key']]}")
 
+# ---- ui_hierarchy: parses, root navigates everywhere, keys covered ----
+m2 = re.search(r'tb_ui_hierarchy_json =\n    "(.*)";', hdr)
+check(m2 is not None, "ui_hierarchy found in params.h")
+if m2:
+    hs = m2.group(1).replace('\\"', '"').replace("\\\\", "\\")
+    try:
+        hier = json.loads(hs)
+    except json.JSONDecodeError as e:
+        fails.append(f"ui_hierarchy is not valid JSON: {e}")
+        hier = {"levels": {}}
+    levels = hier.get("levels", {})
+    check("root" in levels, "hierarchy has a root level")
+    hier_keys = set()
+    nav_targets = set()
+    for lid, lv in levels.items():
+        check(isinstance(lv.get("params"), list) and lv["params"],
+              f"level {lid} has params")
+        knobs = lv.get("knobs", [])
+        check(1 <= len(knobs) <= 8, f"level {lid}: {len(knobs)} knobs (1..8)")
+        pkeys = set()
+        for it in lv["params"]:
+            if "level" in it:
+                nav_targets.add(it["level"])
+            else:
+                check("key" in it and "name" in it, f"level {lid}: param needs key+name")
+                pkeys.add(it.get("key"))
+                hier_keys.add(it.get("key"))
+        for k in knobs:
+            check(k in pkeys, f"level {lid}: knob {k} not in its params")
+    for t in nav_targets:
+        check(t in levels, f"nav target {t} is not a level")
+    for lid in levels:
+        check(lid == "root" or lid in nav_targets, f"level {lid} unreachable from root")
+    for k in seen_keys:
+        check(k in hier_keys, f"movy key {k} missing from ui_hierarchy")
+    for k in hier_keys:
+        check(k in seen_keys, f"hierarchy key {k} not a real param")
+
 # ---- module.json under the 8 KB loader cap ----------------------------
 sz = (ROOT / "src/module.json").stat().st_size
 check(sz < 8192, f"module.json {sz} bytes exceeds 8 KB cap")

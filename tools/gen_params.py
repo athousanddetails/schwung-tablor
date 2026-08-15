@@ -253,6 +253,65 @@ chain_json = json.dumps(chain, separators=(",", ":"))
 chain_json = chain_json.replace('"%DYNAMIC%"', "%s").replace('"%DYNDEF%"', "%s")
 assert chain_json.count("%s") == 4, "expected wt1/wt2 options+default slots"
 
+# ---------------------------------------------------------------- emit: ui_hierarchy
+# The Shadow UI's enterComponentEdit uses the hierarchy editor only when the
+# module OFFERS a hierarchy (9W9's plugin comment, shadow_ui.js ~7584) — a
+# module with neither ui_hierarchy nor ui_chain.js renders NOTHING. Movy also
+# reads it. One level per page; root carries the headline page + navigation.
+LEVEL_MAP = [  # (bank name, row index) -> (level id, label)
+    ("Osc",    1, "osc_uni",   "Unison"),
+    ("Osc",    2, "osc_shape", "Osc Shape"),
+    ("Filter", 0, "filter",    "Filter / Sub / Noise"),
+    ("Filter", 1, "filter_x",  "Filter Extra"),
+    ("Env",    0, "env",       "Envelopes"),
+    ("Env",    1, "env_x",     "Env Options"),
+    ("LFO",    0, "lfo1",      "LFO 1"),
+    ("LFO",    1, "lfo2",      "LFO 2"),
+    ("LFO",    2, "lfo3",      "LFO 3"),
+    ("Mod",    0, "mod12",     "Mod 1-2"),
+    ("Mod",    1, "mod34",     "Mod 3-4"),
+    ("Mod",    2, "mod56",     "Mod 5-6"),
+    ("Mod",    3, "mod78",     "Mod 7-8"),
+    ("Global", 0, "global",    "Global"),
+]
+
+def hier_param(p):
+    """Editable param entry. Dynamic enums carry only {key,name}; their
+    options/type come from chain_params at runtime."""
+    d = {"key": p["key"], "name": p["full"]}
+    if p["type"] == "enum":
+        if p["options"] is not None:
+            d["type"] = "enum"
+            d["options"] = p["options"]
+    else:
+        d["type"] = "int"
+        d["min"], d["max"] = p["min"], p["max"]
+    return d
+
+def build_hierarchy():
+    rows = {(name, i): r for name, _, rws in BANKS for i, r in enumerate(rws)}
+    levels = {}
+
+    root_row = rows[("Osc", 0)]
+    root_params = [hier_param(s) for s in root_row if s]
+    for _, _, lid, label in LEVEL_MAP:
+        root_params.append({"level": lid, "label": label})
+    levels["root"] = {
+        "name": "Tablor",
+        "params": root_params,
+        "knobs": [s["key"] for s in root_row if s],
+    }
+    for bank, ri, lid, label in LEVEL_MAP:
+        r = rows[(bank, ri)]
+        levels[lid] = {
+            "name": label,
+            "params": [hier_param(s) for s in r if s],
+            "knobs": [s["key"] for s in r if s],
+        }
+    return {"levels": levels}
+
+hierarchy_json = json.dumps(build_hierarchy(), separators=(",", ":"))
+
 # ---------------------------------------------------------------- emit: module.json
 module_json = {
     "id": "tablor",
@@ -334,6 +393,11 @@ lines += [
     "/* chain_params JSON template. Four %s slots: wt1 options, wt1 default,",
     " * wt2 options, wt2 default — filled by the wavetable scanner. */",
     f'static const char *tb_chain_params_fmt =\n    "{c_escape(chain_json)}";',
+    "",
+    "/* ui_hierarchy for the Shadow UI (and Movy's generic path): one level",
+    " * per page, root = the headline page + navigation. Static — dynamic",
+    " * enum metadata (the wavetable lists) comes from chain_params. */",
+    f'static const char *tb_ui_hierarchy_json =\n    "{c_escape(hierarchy_json)}";',
     "",
     "#endif /* TABLOR_PARAMS_H */",
 ]
