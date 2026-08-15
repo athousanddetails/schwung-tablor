@@ -1,0 +1,9 @@
+# Reference clones — study material, not part of the module
+reference/
+
+# Build output
+build/
+build-native/
+dist/
+
+.DS_Store

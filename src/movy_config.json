@@ -1,0 +1,1459 @@
+{
+ "id": "tablor",
+ "name": "Tablor",
+ "banks": [
+  {
+   "name": "Osc",
+   "rows": [
+    [
+     {
+      "key": "wt1_table",
+      "short": "TBL1",
+      "full": "WT1 Table",
+      "type": "enum",
+      "options": [
+       "Init"
+      ],
+      "knobAcceleration": "wide"
+     },
+     {
+      "key": "wt2_table",
+      "short": "TBL2",
+      "full": "WT2 Table",
+      "type": "enum",
+      "options": [
+       "Init"
+      ],
+      "knobAcceleration": "wide"
+     },
+     {
+      "key": "wt1_pos",
+      "short": "POS1",
+      "full": "WT1 Pos",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt2_pos",
+      "short": "POS2",
+      "full": "WT2 Pos",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt1_level",
+      "short": "LVL1",
+      "full": "WT1 Level",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt2_level",
+      "short": "LVL2",
+      "full": "WT2 Level",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt1_tune",
+      "short": "TUN1",
+      "full": "WT1 Tune",
+      "type": "int",
+      "min": -24,
+      "max": 24
+     },
+     {
+      "key": "wt2_tune",
+      "short": "TUN2",
+      "full": "WT2 Tune",
+      "type": "int",
+      "min": -24,
+      "max": 24
+     }
+    ],
+    [
+     {
+      "key": "wt1_uni",
+      "short": "UNI1",
+      "full": "WT1 Unison",
+      "type": "int",
+      "min": 1,
+      "max": 4
+     },
+     {
+      "key": "wt1_detune",
+      "short": "DET1",
+      "full": "WT1 Detune",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt1_spread",
+      "short": "SPR1",
+      "full": "WT1 Spread",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt1_pan",
+      "short": "PAN1",
+      "full": "WT1 Pan",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt2_uni",
+      "short": "UNI2",
+      "full": "WT2 Unison",
+      "type": "int",
+      "min": 1,
+      "max": 4
+     },
+     {
+      "key": "wt2_detune",
+      "short": "DET2",
+      "full": "WT2 Detune",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt2_spread",
+      "short": "SPR2",
+      "full": "WT2 Spread",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt2_pan",
+      "short": "PAN2",
+      "full": "WT2 Pan",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     }
+    ],
+    [
+     {
+      "key": "wt1_bend",
+      "short": "BND1",
+      "full": "WT1 Bend",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt1_formant",
+      "short": "FRM1",
+      "full": "WT1 Formant",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt1_fine",
+      "short": "FIN1",
+      "full": "WT1 Fine",
+      "type": "int",
+      "min": -50,
+      "max": 50
+     },
+     {
+      "key": "wt1_retrig",
+      "short": "RTR1",
+      "full": "WT1 Retrig",
+      "type": "enum",
+      "options": [
+       "Free",
+       "Retrig"
+      ]
+     },
+     {
+      "key": "wt2_bend",
+      "short": "BND2",
+      "full": "WT2 Bend",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt2_formant",
+      "short": "FRM2",
+      "full": "WT2 Formant",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt2_fine",
+      "short": "FIN2",
+      "full": "WT2 Fine",
+      "type": "int",
+      "min": -50,
+      "max": 50
+     },
+     {
+      "key": "wt2_retrig",
+      "short": "RTR2",
+      "full": "WT2 Retrig",
+      "type": "enum",
+      "options": [
+       "Free",
+       "Retrig"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "name": "Filter",
+   "rows": [
+    [
+     {
+      "key": "flt_freq",
+      "short": "FREQ",
+      "full": "Filter Freq",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "filter": "cutoff"
+     },
+     {
+      "key": "flt_res",
+      "short": "RES",
+      "full": "Filter Res",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "filter": "resonance"
+     },
+     {
+      "key": "flt_env",
+      "short": "FENV",
+      "full": "Filter EG Amt",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "flt_type",
+      "short": "TYPE",
+      "full": "Filter Type",
+      "type": "enum",
+      "options": [
+       "LP 12",
+       "LP 24",
+       "HP 12",
+       "HP 24",
+       "BP 12",
+       "BP 24",
+       "Notch 12",
+       "Notch 24"
+      ],
+      "filter": "mode"
+     },
+     {
+      "key": "sub_level",
+      "short": "SUB",
+      "full": "Sub Level",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "sub_wave",
+      "short": "SUBW",
+      "full": "Sub Wave",
+      "type": "enum",
+      "options": [
+       "Sine",
+       "Triangle",
+       "Saw",
+       "Square",
+       "Pulse 25",
+       "Pulse 12"
+      ]
+     },
+     {
+      "key": "noise_level",
+      "short": "NOIS",
+      "full": "Noise Level",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "noise_type",
+      "short": "NTYP",
+      "full": "Noise Type",
+      "type": "enum",
+      "options": [
+       "White",
+       "Pink"
+      ]
+     }
+    ],
+    [
+     {
+      "key": "flt_key",
+      "short": "KEYT",
+      "full": "Key Track",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "flt_vel",
+      "short": "VELT",
+      "full": "Vel Track",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "sub_tune",
+      "short": "SUBT",
+      "full": "Sub Tune",
+      "type": "int",
+      "min": -24,
+      "max": 24
+     },
+     {
+      "key": "sub_pan",
+      "short": "SUBP",
+      "full": "Sub Pan",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "noise_pan",
+      "short": "NPAN",
+      "full": "Noise Pan",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "rt_wt1",
+      "short": "FLT1",
+      "full": "WT1 to Filter",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     },
+     {
+      "key": "rt_wt2",
+      "short": "FLT2",
+      "full": "WT2 to Filter",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     },
+     {
+      "key": "rt_subnoise",
+      "short": "FLTS",
+      "full": "Sub/Noise Filt",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "name": "Env",
+   "rows": [
+    [
+     {
+      "key": "vca_a",
+      "short": "ATK",
+      "full": "VCA Attack",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "env": "a"
+     },
+     {
+      "key": "vca_d",
+      "short": "DEC",
+      "full": "VCA Decay",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "env": "d"
+     },
+     {
+      "key": "vca_s",
+      "short": "SUS",
+      "full": "VCA Sustain",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "env": "s"
+     },
+     {
+      "key": "vca_r",
+      "short": "REL",
+      "full": "VCA Release",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "env": "r"
+     },
+     {
+      "key": "flt_a",
+      "short": "FATK",
+      "full": "Flt Attack",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "env": "a"
+     },
+     {
+      "key": "flt_d",
+      "short": "FDEC",
+      "full": "Flt Decay",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "env": "d"
+     },
+     {
+      "key": "flt_s",
+      "short": "FSUS",
+      "full": "Flt Sustain",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "env": "s"
+     },
+     {
+      "key": "flt_r",
+      "short": "FREL",
+      "full": "Flt Release",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "env": "r"
+     }
+    ],
+    [
+     {
+      "key": "vca_vel",
+      "short": "VVEL",
+      "full": "VCA Velocity",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "vca_retrig",
+      "short": "VRTR",
+      "full": "VCA Retrig",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     },
+     {
+      "key": "flt_retrig",
+      "short": "FRTR",
+      "full": "Flt Retrig",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     },
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   ]
+  },
+  {
+   "name": "LFO",
+   "rows": [
+    [
+     {
+      "key": "lfo1_shape",
+      "short": "SHP1",
+      "full": "LFO1 Shape",
+      "type": "enum",
+      "options": [
+       "Sine",
+       "Triangle",
+       "Saw Up",
+       "Saw Down",
+       "Square",
+       "Square+",
+       "S&H",
+       "Noise"
+      ],
+      "lfo": "shape"
+     },
+     {
+      "key": "lfo1_rate",
+      "short": "RAT1",
+      "full": "LFO1 Rate",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "rate"
+     },
+     {
+      "key": "lfo1_sync",
+      "short": "SYN1",
+      "full": "LFO1 Sync",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     },
+     {
+      "key": "lfo1_beat",
+      "short": "BEA1",
+      "full": "LFO1 Beat",
+      "type": "enum",
+      "options": [
+       "1/32",
+       "1/16T",
+       "1/16",
+       "1/8T",
+       "1/16.",
+       "1/8",
+       "1/4T",
+       "1/8.",
+       "1/4",
+       "1/2T",
+       "1/4.",
+       "1/2",
+       "1/1T",
+       "1/2.",
+       "1/1",
+       "2/1"
+      ]
+     },
+     {
+      "key": "lfo1_depth",
+      "short": "DEP1",
+      "full": "LFO1 Depth",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "depth"
+     },
+     {
+      "key": "lfo1_phase",
+      "short": "PHA1",
+      "full": "LFO1 Phase",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "phase"
+     },
+     {
+      "key": "lfo1_offset",
+      "short": "OFF1",
+      "full": "LFO1 Offset",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "lfo1_retrig",
+      "short": "RTG1",
+      "full": "LFO1 Retrig",
+      "type": "enum",
+      "options": [
+       "Free",
+       "Retrig"
+      ],
+      "lfo": "retrig"
+     }
+    ],
+    [
+     {
+      "key": "lfo2_shape",
+      "short": "SHP2",
+      "full": "LFO2 Shape",
+      "type": "enum",
+      "options": [
+       "Sine",
+       "Triangle",
+       "Saw Up",
+       "Saw Down",
+       "Square",
+       "Square+",
+       "S&H",
+       "Noise"
+      ],
+      "lfo": "shape"
+     },
+     {
+      "key": "lfo2_rate",
+      "short": "RAT2",
+      "full": "LFO2 Rate",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "rate"
+     },
+     {
+      "key": "lfo2_sync",
+      "short": "SYN2",
+      "full": "LFO2 Sync",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     },
+     {
+      "key": "lfo2_beat",
+      "short": "BEA2",
+      "full": "LFO2 Beat",
+      "type": "enum",
+      "options": [
+       "1/32",
+       "1/16T",
+       "1/16",
+       "1/8T",
+       "1/16.",
+       "1/8",
+       "1/4T",
+       "1/8.",
+       "1/4",
+       "1/2T",
+       "1/4.",
+       "1/2",
+       "1/1T",
+       "1/2.",
+       "1/1",
+       "2/1"
+      ]
+     },
+     {
+      "key": "lfo2_depth",
+      "short": "DEP2",
+      "full": "LFO2 Depth",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "depth"
+     },
+     {
+      "key": "lfo2_phase",
+      "short": "PHA2",
+      "full": "LFO2 Phase",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "phase"
+     },
+     {
+      "key": "lfo2_offset",
+      "short": "OFF2",
+      "full": "LFO2 Offset",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "lfo2_retrig",
+      "short": "RTG2",
+      "full": "LFO2 Retrig",
+      "type": "enum",
+      "options": [
+       "Free",
+       "Retrig"
+      ],
+      "lfo": "retrig"
+     }
+    ],
+    [
+     {
+      "key": "lfo3_shape",
+      "short": "SHP3",
+      "full": "LFO3 Shape",
+      "type": "enum",
+      "options": [
+       "Sine",
+       "Triangle",
+       "Saw Up",
+       "Saw Down",
+       "Square",
+       "Square+",
+       "S&H",
+       "Noise"
+      ],
+      "lfo": "shape"
+     },
+     {
+      "key": "lfo3_rate",
+      "short": "RAT3",
+      "full": "LFO3 Rate",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "rate"
+     },
+     {
+      "key": "lfo3_sync",
+      "short": "SYN3",
+      "full": "LFO3 Sync",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     },
+     {
+      "key": "lfo3_beat",
+      "short": "BEA3",
+      "full": "LFO3 Beat",
+      "type": "enum",
+      "options": [
+       "1/32",
+       "1/16T",
+       "1/16",
+       "1/8T",
+       "1/16.",
+       "1/8",
+       "1/4T",
+       "1/8.",
+       "1/4",
+       "1/2T",
+       "1/4.",
+       "1/2",
+       "1/1T",
+       "1/2.",
+       "1/1",
+       "2/1"
+      ]
+     },
+     {
+      "key": "lfo3_depth",
+      "short": "DEP3",
+      "full": "LFO3 Depth",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "depth"
+     },
+     {
+      "key": "lfo3_phase",
+      "short": "PHA3",
+      "full": "LFO3 Phase",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "lfo": "phase"
+     },
+     {
+      "key": "lfo3_offset",
+      "short": "OFF3",
+      "full": "LFO3 Offset",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "lfo3_retrig",
+      "short": "RTG3",
+      "full": "LFO3 Retrig",
+      "type": "enum",
+      "options": [
+       "Free",
+       "Retrig"
+      ],
+      "lfo": "retrig"
+     }
+    ]
+   ]
+  },
+  {
+   "name": "Mod",
+   "rows": [
+    [
+     {
+      "key": "m1_src",
+      "short": "SRC1",
+      "full": "Mod1 Source",
+      "type": "enum",
+      "options": [
+       "None",
+       "LFO 1",
+       "LFO 2",
+       "LFO 3",
+       "Filter EG",
+       "VCA EG",
+       "Velocity",
+       "Note",
+       "Mod Wheel",
+       "Aftertouch",
+       "Pitch Bend",
+       "Random"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m1_dst",
+      "short": "DST1",
+      "full": "Mod1 Dest",
+      "type": "enum",
+      "options": [
+       "None",
+       "WT1 Pos",
+       "WT2 Pos",
+       "WT1 Level",
+       "WT2 Level",
+       "WT1 Tune",
+       "WT2 Tune",
+       "WT1 Bend",
+       "WT2 Bend",
+       "WT1 Formant",
+       "WT2 Formant",
+       "WT1 Pan",
+       "WT2 Pan",
+       "Filter Freq",
+       "Filter Res",
+       "Sub Level",
+       "Noise Level",
+       "Amp",
+       "LFO1 Rate",
+       "LFO2 Rate",
+       "LFO3 Rate"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m1_amt",
+      "short": "AMT1",
+      "full": "Mod1 Amount",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "automatable": false
+     },
+     {
+      "key": "m1_on",
+      "short": "ON1",
+      "full": "Mod1 On",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m2_src",
+      "short": "SRC2",
+      "full": "Mod2 Source",
+      "type": "enum",
+      "options": [
+       "None",
+       "LFO 1",
+       "LFO 2",
+       "LFO 3",
+       "Filter EG",
+       "VCA EG",
+       "Velocity",
+       "Note",
+       "Mod Wheel",
+       "Aftertouch",
+       "Pitch Bend",
+       "Random"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m2_dst",
+      "short": "DST2",
+      "full": "Mod2 Dest",
+      "type": "enum",
+      "options": [
+       "None",
+       "WT1 Pos",
+       "WT2 Pos",
+       "WT1 Level",
+       "WT2 Level",
+       "WT1 Tune",
+       "WT2 Tune",
+       "WT1 Bend",
+       "WT2 Bend",
+       "WT1 Formant",
+       "WT2 Formant",
+       "WT1 Pan",
+       "WT2 Pan",
+       "Filter Freq",
+       "Filter Res",
+       "Sub Level",
+       "Noise Level",
+       "Amp",
+       "LFO1 Rate",
+       "LFO2 Rate",
+       "LFO3 Rate"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m2_amt",
+      "short": "AMT2",
+      "full": "Mod2 Amount",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "automatable": false
+     },
+     {
+      "key": "m2_on",
+      "short": "ON2",
+      "full": "Mod2 On",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false
+     }
+    ],
+    [
+     {
+      "key": "m3_src",
+      "short": "SRC3",
+      "full": "Mod3 Source",
+      "type": "enum",
+      "options": [
+       "None",
+       "LFO 1",
+       "LFO 2",
+       "LFO 3",
+       "Filter EG",
+       "VCA EG",
+       "Velocity",
+       "Note",
+       "Mod Wheel",
+       "Aftertouch",
+       "Pitch Bend",
+       "Random"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m3_dst",
+      "short": "DST3",
+      "full": "Mod3 Dest",
+      "type": "enum",
+      "options": [
+       "None",
+       "WT1 Pos",
+       "WT2 Pos",
+       "WT1 Level",
+       "WT2 Level",
+       "WT1 Tune",
+       "WT2 Tune",
+       "WT1 Bend",
+       "WT2 Bend",
+       "WT1 Formant",
+       "WT2 Formant",
+       "WT1 Pan",
+       "WT2 Pan",
+       "Filter Freq",
+       "Filter Res",
+       "Sub Level",
+       "Noise Level",
+       "Amp",
+       "LFO1 Rate",
+       "LFO2 Rate",
+       "LFO3 Rate"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m3_amt",
+      "short": "AMT3",
+      "full": "Mod3 Amount",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "automatable": false
+     },
+     {
+      "key": "m3_on",
+      "short": "ON3",
+      "full": "Mod3 On",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m4_src",
+      "short": "SRC4",
+      "full": "Mod4 Source",
+      "type": "enum",
+      "options": [
+       "None",
+       "LFO 1",
+       "LFO 2",
+       "LFO 3",
+       "Filter EG",
+       "VCA EG",
+       "Velocity",
+       "Note",
+       "Mod Wheel",
+       "Aftertouch",
+       "Pitch Bend",
+       "Random"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m4_dst",
+      "short": "DST4",
+      "full": "Mod4 Dest",
+      "type": "enum",
+      "options": [
+       "None",
+       "WT1 Pos",
+       "WT2 Pos",
+       "WT1 Level",
+       "WT2 Level",
+       "WT1 Tune",
+       "WT2 Tune",
+       "WT1 Bend",
+       "WT2 Bend",
+       "WT1 Formant",
+       "WT2 Formant",
+       "WT1 Pan",
+       "WT2 Pan",
+       "Filter Freq",
+       "Filter Res",
+       "Sub Level",
+       "Noise Level",
+       "Amp",
+       "LFO1 Rate",
+       "LFO2 Rate",
+       "LFO3 Rate"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m4_amt",
+      "short": "AMT4",
+      "full": "Mod4 Amount",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "automatable": false
+     },
+     {
+      "key": "m4_on",
+      "short": "ON4",
+      "full": "Mod4 On",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false
+     }
+    ],
+    [
+     {
+      "key": "m5_src",
+      "short": "SRC5",
+      "full": "Mod5 Source",
+      "type": "enum",
+      "options": [
+       "None",
+       "LFO 1",
+       "LFO 2",
+       "LFO 3",
+       "Filter EG",
+       "VCA EG",
+       "Velocity",
+       "Note",
+       "Mod Wheel",
+       "Aftertouch",
+       "Pitch Bend",
+       "Random"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m5_dst",
+      "short": "DST5",
+      "full": "Mod5 Dest",
+      "type": "enum",
+      "options": [
+       "None",
+       "WT1 Pos",
+       "WT2 Pos",
+       "WT1 Level",
+       "WT2 Level",
+       "WT1 Tune",
+       "WT2 Tune",
+       "WT1 Bend",
+       "WT2 Bend",
+       "WT1 Formant",
+       "WT2 Formant",
+       "WT1 Pan",
+       "WT2 Pan",
+       "Filter Freq",
+       "Filter Res",
+       "Sub Level",
+       "Noise Level",
+       "Amp",
+       "LFO1 Rate",
+       "LFO2 Rate",
+       "LFO3 Rate"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m5_amt",
+      "short": "AMT5",
+      "full": "Mod5 Amount",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "automatable": false
+     },
+     {
+      "key": "m5_on",
+      "short": "ON5",
+      "full": "Mod5 On",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m6_src",
+      "short": "SRC6",
+      "full": "Mod6 Source",
+      "type": "enum",
+      "options": [
+       "None",
+       "LFO 1",
+       "LFO 2",
+       "LFO 3",
+       "Filter EG",
+       "VCA EG",
+       "Velocity",
+       "Note",
+       "Mod Wheel",
+       "Aftertouch",
+       "Pitch Bend",
+       "Random"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m6_dst",
+      "short": "DST6",
+      "full": "Mod6 Dest",
+      "type": "enum",
+      "options": [
+       "None",
+       "WT1 Pos",
+       "WT2 Pos",
+       "WT1 Level",
+       "WT2 Level",
+       "WT1 Tune",
+       "WT2 Tune",
+       "WT1 Bend",
+       "WT2 Bend",
+       "WT1 Formant",
+       "WT2 Formant",
+       "WT1 Pan",
+       "WT2 Pan",
+       "Filter Freq",
+       "Filter Res",
+       "Sub Level",
+       "Noise Level",
+       "Amp",
+       "LFO1 Rate",
+       "LFO2 Rate",
+       "LFO3 Rate"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m6_amt",
+      "short": "AMT6",
+      "full": "Mod6 Amount",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "automatable": false
+     },
+     {
+      "key": "m6_on",
+      "short": "ON6",
+      "full": "Mod6 On",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false
+     }
+    ],
+    [
+     {
+      "key": "m7_src",
+      "short": "SRC7",
+      "full": "Mod7 Source",
+      "type": "enum",
+      "options": [
+       "None",
+       "LFO 1",
+       "LFO 2",
+       "LFO 3",
+       "Filter EG",
+       "VCA EG",
+       "Velocity",
+       "Note",
+       "Mod Wheel",
+       "Aftertouch",
+       "Pitch Bend",
+       "Random"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m7_dst",
+      "short": "DST7",
+      "full": "Mod7 Dest",
+      "type": "enum",
+      "options": [
+       "None",
+       "WT1 Pos",
+       "WT2 Pos",
+       "WT1 Level",
+       "WT2 Level",
+       "WT1 Tune",
+       "WT2 Tune",
+       "WT1 Bend",
+       "WT2 Bend",
+       "WT1 Formant",
+       "WT2 Formant",
+       "WT1 Pan",
+       "WT2 Pan",
+       "Filter Freq",
+       "Filter Res",
+       "Sub Level",
+       "Noise Level",
+       "Amp",
+       "LFO1 Rate",
+       "LFO2 Rate",
+       "LFO3 Rate"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m7_amt",
+      "short": "AMT7",
+      "full": "Mod7 Amount",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "automatable": false
+     },
+     {
+      "key": "m7_on",
+      "short": "ON7",
+      "full": "Mod7 On",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m8_src",
+      "short": "SRC8",
+      "full": "Mod8 Source",
+      "type": "enum",
+      "options": [
+       "None",
+       "LFO 1",
+       "LFO 2",
+       "LFO 3",
+       "Filter EG",
+       "VCA EG",
+       "Velocity",
+       "Note",
+       "Mod Wheel",
+       "Aftertouch",
+       "Pitch Bend",
+       "Random"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m8_dst",
+      "short": "DST8",
+      "full": "Mod8 Dest",
+      "type": "enum",
+      "options": [
+       "None",
+       "WT1 Pos",
+       "WT2 Pos",
+       "WT1 Level",
+       "WT2 Level",
+       "WT1 Tune",
+       "WT2 Tune",
+       "WT1 Bend",
+       "WT2 Bend",
+       "WT1 Formant",
+       "WT2 Formant",
+       "WT1 Pan",
+       "WT2 Pan",
+       "Filter Freq",
+       "Filter Res",
+       "Sub Level",
+       "Noise Level",
+       "Amp",
+       "LFO1 Rate",
+       "LFO2 Rate",
+       "LFO3 Rate"
+      ],
+      "automatable": false
+     },
+     {
+      "key": "m8_amt",
+      "short": "AMT8",
+      "full": "Mod8 Amount",
+      "type": "int",
+      "min": 0,
+      "max": 127,
+      "automatable": false
+     },
+     {
+      "key": "m8_on",
+      "short": "ON8",
+      "full": "Mod8 On",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false
+     }
+    ]
+   ]
+  },
+  {
+   "name": "Global",
+   "global": true,
+   "rows": [
+    [
+     {
+      "key": "voice_mode",
+      "short": "MODE",
+      "full": "Voice Mode",
+      "type": "enum",
+      "options": [
+       "Poly",
+       "Mono"
+      ]
+     },
+     {
+      "key": "voices",
+      "short": "VOIC",
+      "full": "Voices",
+      "type": "int",
+      "min": 1,
+      "max": 8
+     },
+     {
+      "key": "glide",
+      "short": "GLID",
+      "full": "Glide",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "glide_mode",
+      "short": "GMOD",
+      "full": "Glide Mode",
+      "type": "enum",
+      "options": [
+       "Off",
+       "Glissando",
+       "Portamento"
+      ]
+     },
+     {
+      "key": "legato",
+      "short": "LEGA",
+      "full": "Legato",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
+     },
+     {
+      "key": "pb_range",
+      "short": "BEND",
+      "full": "PB Range",
+      "type": "int",
+      "min": 0,
+      "max": 24
+     },
+     {
+      "key": "volume",
+      "short": "VOL",
+      "full": "Volume",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "wt_rescan",
+      "short": "SCAN",
+      "full": "Rescan Tables",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false,
+      "behavior": "trigger"
+     }
+    ]
+   ]
+  }
+ ]
+}
