@@ -17,7 +17,12 @@ def check(cond, msg):
 cfg = json.loads((ROOT / "src/movy_config.json").read_text())
 check(cfg.get("id") == "tablor" and cfg.get("name"), "id/name present")
 banks = cfg.get("banks", [])
-check(len(banks) == 6, f"expected 6 banks, got {len(banks)}")
+check(len(banks) == 15, f"expected 15 banks, got {len(banks)}")
+for b in banks:
+    # Movy: a config bank is EXACTLY one page (bankGroups is per-bank but
+    # indexed per-page; multi-row banks shift every later page label)
+    check(len(b.get("rows", [])) == 1,
+          f"bank {b.get('name')}: must be single-row (Movy bank == page)")
 
 VALID_TYPES  = {"float", "int", "enum", "file"}
 VALID_ENV    = {"a", "d", "s", "r"}
@@ -132,5 +137,5 @@ if fails:
     for f in fails:
         print("  -", f)
     sys.exit(1)
-print(f"config contract OK: 6 banks, {len(seen_keys)} keys, "
+print(f"config contract OK: {len(banks)} banks, {len(seen_keys)} keys, "
       f"chain fmt splices to valid JSON, module.json {sz} B")

@@ -333,7 +333,12 @@
             PAGES = [{ name: "NO DATA", sec: "?", slots: [] }];
             SECTIONS = [{ name: "?", firstPage: 0 }];
         }
-        selectPage(0, false);
+        /* The USER page becomes the home page once the user has built one —
+         * their own 8 knobs greet them; everything else is a jog away. */
+        var hasAssignments = false;
+        for (var i = 0; i < 8; i++)
+            if (userMap[i]) hasAssignments = true;
+        selectPage(hasAssignments ? PAGES.length - 1 : 0, false);
         if (has("host_announce_screenreader"))
             host_announce_screenreader("Tablor");
     }

@@ -82,7 +82,12 @@
       "min": -24,
       "max": 24
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "Unison",
+   "rows": [
     [
      {
       "key": "wt1_uni",
@@ -148,7 +153,12 @@
       "min": 0,
       "max": 127
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "Shape",
+   "rows": [
     [
      {
       "key": "wt1_bend",
@@ -308,7 +318,12 @@
        "Pink"
       ]
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "Filt+",
+   "rows": [
     [
      {
       "key": "flt_key",
@@ -459,7 +474,12 @@
       "max": 127,
       "env": "r"
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "Env+",
+   "rows": [
     [
      {
       "key": "vca_vel",
@@ -498,7 +518,7 @@
    ]
   },
   {
-   "name": "LFO",
+   "name": "LFO 1",
    "rows": [
     [
      {
@@ -598,7 +618,12 @@
       ],
       "lfo": "retrig"
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "LFO 2",
+   "rows": [
     [
      {
       "key": "lfo2_shape",
@@ -697,7 +722,12 @@
       ],
       "lfo": "retrig"
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "LFO 3",
+   "rows": [
     [
      {
       "key": "lfo3_shape",
@@ -800,7 +830,7 @@
    ]
   },
   {
-   "name": "Mod",
+   "name": "Mod 1-2",
    "rows": [
     [
      {
@@ -945,7 +975,12 @@
       ],
       "automatable": false
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "Mod 3-4",
+   "rows": [
     [
      {
       "key": "m3_src",
@@ -1089,7 +1124,12 @@
       ],
       "automatable": false
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "Mod 5-6",
+   "rows": [
     [
      {
       "key": "m5_src",
@@ -1233,7 +1273,12 @@
       ],
       "automatable": false
      }
-    ],
+    ]
+   ]
+  },
+  {
+   "name": "Mod 7-8",
+   "rows": [
     [
      {
       "key": "m7_src",

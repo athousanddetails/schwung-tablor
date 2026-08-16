@@ -227,14 +227,32 @@ def movy_slot(p):
         s[k] = v
     return s
 
+# Movy constraint (config-pages.ts: "Each config bank is exactly one page"):
+# bankGroups is one entry PER BANK but indexed PER PAGE, so a multi-row bank
+# shifts every following page label. One bank per page, named like ui_chain.
+MOVY_PAGE_NAMES = {
+    ("Osc", 0): "Osc",    ("Osc", 1): "Unison",  ("Osc", 2): "Shape",
+    ("Filter", 0): "Filter", ("Filter", 1): "Filt+",
+    ("Env", 0): "Env",    ("Env", 1): "Env+",
+    ("LFO", 0): "LFO 1",  ("LFO", 1): "LFO 2",   ("LFO", 2): "LFO 3",
+    ("Mod", 0): "Mod 1-2", ("Mod", 1): "Mod 3-4",
+    ("Mod", 2): "Mod 5-6", ("Mod", 3): "Mod 7-8",
+    ("Global", 0): "Global",
+}
+
+movy_banks = []
+for name, glob, rows in BANKS:
+    for ri, r in enumerate(rows):
+        movy_banks.append({
+            "name": MOVY_PAGE_NAMES[(name, ri)],
+            **({"global": True} if glob else {}),
+            "rows": [[movy_slot(s) for s in r]],
+        })
+
 movy_config = {
     "id": "tablor",
     "name": "Tablor",
-    "banks": [
-        {"name": name, **({"global": True} if glob else {}),
-         "rows": [[movy_slot(s) for s in r] for r in rows]}
-        for name, glob, rows in BANKS
-    ],
+    "banks": movy_banks,
 }
 
 # ---------------------------------------------------------------- emit: chain_params
