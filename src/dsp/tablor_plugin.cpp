@@ -174,8 +174,26 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "chain_params"))
         return write_str(buf, buf_len, tb_chain_params_json);
 
-    if (!strcmp(key, "ui_hierarchy"))
-        return write_str(buf, buf_len, tb_ui_hierarchy_json);
+    /* ui_hierarchy is deliberately NOT served: the Shadow UI's hierarchy
+     * editor would take precedence over our ui_chain.js (the 9W9 rule). */
+
+    /* Fresh newline-separated list of wavetable files, for ui_chain.js's
+     * encoder stepping. Rescan on every call — names-only, a few ms, and
+     * always current with whatever the user dropped in the folder. */
+    if (!strcmp(key, "wt_files")) {
+        inst->scanner.scan();
+        int o = 0;
+        for (const auto &e : inst->scanner.list()) {
+            if (e.path.empty()) continue;          /* skip built-in Init */
+            int need = (int) e.path.size() + 1;
+            if (o + need >= buf_len - 1) break;
+            memcpy(buf + o, e.path.c_str(), e.path.size());
+            o += (int) e.path.size();
+            buf[o++] = '\n';
+        }
+        buf[o] = 0;
+        return o;
+    }
 
     if (!strcmp(key, "state")) {
         int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");

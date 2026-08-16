@@ -90,43 +90,38 @@ if m:
                   p.get("live_preview") is True,
                   f"{p['key']}: filepath needs root/filter/live_preview")
 
-# ---- ui_hierarchy: parses, root navigates everywhere, keys covered ----
-m2 = re.search(r'tb_ui_hierarchy_json =\n    "(.*)";', hdr)
-check(m2 is not None, "ui_hierarchy found in params.h")
-if m2:
-    hs = m2.group(1).replace('\\"', '"').replace("\\\\", "\\")
-    try:
-        hier = json.loads(hs)
-    except json.JSONDecodeError as e:
-        fails.append(f"ui_hierarchy is not valid JSON: {e}")
-        hier = {"levels": {}}
-    levels = hier.get("levels", {})
-    check("root" in levels, "hierarchy has a root level")
-    hier_keys = set()
-    nav_targets = set()
-    for lid, lv in levels.items():
-        check(isinstance(lv.get("params"), list) and lv["params"],
-              f"level {lid} has params")
-        knobs = lv.get("knobs", [])
-        check(1 <= len(knobs) <= 8, f"level {lid}: {len(knobs)} knobs (1..8)")
-        pkeys = set()
-        for it in lv["params"]:
-            if "level" in it:
-                nav_targets.add(it["level"])
-            else:
-                check("key" in it and "name" in it, f"level {lid}: param needs key+name")
-                pkeys.add(it.get("key"))
-                hier_keys.add(it.get("key"))
-        for k in knobs:
-            check(k in pkeys, f"level {lid}: knob {k} not in its params")
-    for t in nav_targets:
-        check(t in levels, f"nav target {t} is not a level")
-    for lid in levels:
-        check(lid == "root" or lid in nav_targets, f"level {lid} unreachable from root")
+# ---- ui_pages.json (ui_chain.js data): parses, full key coverage ------
+pages_file = ROOT / "src/ui_pages.json"
+check(pages_file.exists(), "ui_pages.json generated")
+if pages_file.exists():
+    up = json.loads(pages_file.read_text())
+    pages = up.get("pages", [])
+    check(len(pages) == 15, f"15 pages expected, got {len(pages)}")
+    page_keys = set()
+    for pg in pages:
+        check(isinstance(pg.get("name"), str) and pg.get("sec"), "page has name+sec")
+        check(len(pg.get("slots", [])) == 8, f"page {pg.get('name')}: 8 slots")
+        for s in pg["slots"]:
+            if s is None:
+                continue
+            check(s.get("k") and s.get("n") and s.get("full") and s.get("t"),
+                  f"slot needs k/n/full/t in {pg['name']}")
+            if s["t"] == "enum":
+                check(isinstance(s.get("options"), list) and s["options"],
+                      f"{s['k']}: enum slot needs options")
+            elif s["t"] == "int":
+                check(s.get("min") is not None and s.get("max") is not None,
+                      f"{s['k']}: int slot needs min/max")
+            page_keys.add(s["k"])
     for k in seen_keys:
-        check(k in hier_keys, f"movy key {k} missing from ui_hierarchy")
-    for k in hier_keys:
-        check(k in seen_keys, f"hierarchy key {k} not a real param")
+        check(k in page_keys, f"movy key {k} missing from ui_pages")
+    for k in page_keys:
+        check(k in seen_keys, f"ui_pages key {k} not a real param")
+
+# ---- ui_hierarchy must NOT be emitted (ui_chain.js would be ignored) --
+check("tb_ui_hierarchy_json" not in hdr,
+      "ui_hierarchy absent from params.h (the 9W9 rule)")
+check((ROOT / "src/ui_chain.js").exists(), "ui_chain.js present")
 
 # ---- module.json under the 8 KB loader cap ----------------------------
 sz = (ROOT / "src/module.json").stat().st_size

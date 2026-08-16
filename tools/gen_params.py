@@ -255,69 +255,51 @@ chain = [chain_param(p) for p in PARAMS]
 chain_json = json.dumps(chain, separators=(",", ":"))
 assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"
 
-# ---------------------------------------------------------------- emit: ui_hierarchy
-# The Shadow UI's enterComponentEdit uses the hierarchy editor only when the
-# module OFFERS a hierarchy (9W9's plugin comment, shadow_ui.js ~7584) — a
-# module with neither ui_hierarchy nor ui_chain.js renders NOTHING. Movy also
-# reads it. One level per page; root carries the headline page + navigation.
-LEVEL_MAP = [  # (bank name, row index) -> (level id, label)
-    ("Osc",    1, "osc_uni",   "Unison"),
-    ("Osc",    2, "osc_shape", "Osc Shape"),
-    ("Filter", 0, "filter",    "Filter / Sub / Noise"),
-    ("Filter", 1, "filter_x",  "Filter Extra"),
-    ("Env",    0, "env",       "Envelopes"),
-    ("Env",    1, "env_x",     "Env Options"),
-    ("LFO",    0, "lfo1",      "LFO 1"),
-    ("LFO",    1, "lfo2",      "LFO 2"),
-    ("LFO",    2, "lfo3",      "LFO 3"),
-    ("Mod",    0, "mod12",     "Mod 1-2"),
-    ("Mod",    1, "mod34",     "Mod 3-4"),
-    ("Mod",    2, "mod56",     "Mod 5-6"),
-    ("Mod",    3, "mod78",     "Mod 7-8"),
-    ("Global", 0, "global",    "Global"),
+# ---------------------------------------------------------------- emit: ui_pages.json
+# Data for Tablor's OWN Shadow UI (ui_chain.js) — the 9W9 treatment: jog flips
+# pages, Shift+jog jumps sections, 8 encoders edit the visible page.
+# NOTE: the module must NOT serve ui_hierarchy — the Shadow UI's hierarchy
+# editor takes precedence over ui_chain.js whenever a module offers one.
+PAGE_MAP = [  # (bank name, row index, page title). Section = bank name.
+    ("Osc",    0, "OSC"),
+    ("Osc",    1, "UNISON"),
+    ("Osc",    2, "SHAPE"),
+    ("Filter", 0, "FILTER"),
+    ("Filter", 1, "FILT+"),
+    ("Env",    0, "ENV"),
+    ("Env",    1, "ENV+"),
+    ("LFO",    0, "LFO 1"),
+    ("LFO",    1, "LFO 2"),
+    ("LFO",    2, "LFO 3"),
+    ("Mod",    0, "MOD 1-2"),
+    ("Mod",    1, "MOD 3-4"),
+    ("Mod",    2, "MOD 5-6"),
+    ("Mod",    3, "MOD 7-8"),
+    ("Global", 0, "GLOBAL"),
 ]
 
-def hier_param(p):
-    """Editable param entry with FULL metadata — the Shadow UI edits straight
-    from the hierarchy, so nothing may rely on a chain_params merge."""
-    d = {"key": p["key"], "name": p["full"]}
-    if p["type"] == "file":
-        d["type"] = "filepath"
-        d["root"] = WT_ROOT
-        d["start_path"] = WT_ROOT
-        d["filter"] = WT_FILTER
-        d["live_preview"] = True
-    elif p["type"] == "enum":
-        d["type"] = "enum"
+def page_slot(p):
+    if p is None:
+        return None
+    d = {"k": p["key"], "n": p["short"], "full": p["full"], "t": p["type"]}
+    if p["type"] == "enum":
         d["options"] = p["options"]
-    else:
-        d["type"] = "int"
+    elif p["type"] == "int":
         d["min"], d["max"] = p["min"], p["max"]
     return d
 
-def build_hierarchy():
+def build_pages():
     rows = {(name, i): r for name, _, rws in BANKS for i, r in enumerate(rws)}
-    levels = {}
+    pages = []
+    for bank, ri, title in PAGE_MAP:
+        pages.append({
+            "name": title,
+            "sec": bank,
+            "slots": [page_slot(s) for s in rows[(bank, ri)]],
+        })
+    return {"pages": pages}
 
-    root_row = rows[("Osc", 0)]
-    root_params = [hier_param(s) for s in root_row if s]
-    for _, _, lid, label in LEVEL_MAP:
-        root_params.append({"level": lid, "label": label})
-    levels["root"] = {
-        "name": "Tablor",
-        "params": root_params,
-        "knobs": [s["key"] for s in root_row if s],
-    }
-    for bank, ri, lid, label in LEVEL_MAP:
-        r = rows[(bank, ri)]
-        levels[lid] = {
-            "name": label,
-            "params": [hier_param(s) for s in r if s],
-            "knobs": [s["key"] for s in r if s],
-        }
-    return {"levels": levels}
-
-hierarchy_json = json.dumps(build_hierarchy(), separators=(",", ":"))
+ui_pages = build_pages()
 
 # ---------------------------------------------------------------- emit: module.json
 module_json = {
@@ -404,10 +386,9 @@ lines += [
     " * is a filepath param; the file browser lists the folder live). */",
     f'static const char *tb_chain_params_json =\n    "{c_escape(chain_json)}";',
     "",
-    "/* ui_hierarchy for the Shadow UI (and Movy's generic path): one level",
-    " * per page, root = the headline page + navigation. Static — dynamic",
-    " * enum metadata (the wavetable lists) comes from chain_params. */",
-    f'static const char *tb_ui_hierarchy_json =\n    "{c_escape(hierarchy_json)}";',
+    "/* NOTE: ui_hierarchy is deliberately NOT served — the Shadow UI's",
+    " * hierarchy editor would take precedence over the module's own",
+    " * ui_chain.js (the 9W9 rule). Movy uses movy_config + chain_params. */",
     "",
     "#endif /* TABLOR_PARAMS_H */",
 ]
@@ -417,9 +398,12 @@ out_module = ROOT / "src" / "module.json"
 out_movy   = ROOT / "src" / "movy_config.json"
 out_header = ROOT / "src" / "dsp" / "params.h"
 
+out_pages = ROOT / "src" / "ui_pages.json"
+
 out_module.write_text(json.dumps(module_json, indent=2) + "\n")
 out_movy.write_text(json.dumps(movy_config, indent=1) + "\n")
 out_header.write_text("\n".join(lines) + "\n")
+out_pages.write_text(json.dumps(ui_pages, separators=(",", ":")) + "\n")
 
 msize = out_module.stat().st_size
 print(f"params: {len(PARAMS)}")

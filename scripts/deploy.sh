@@ -23,13 +23,17 @@ ssh "$HOST" "mkdir -p $DEST/wavetables"
 scp -q "$SRC/build/dsp.so"          "$HOST:$DEST/dsp.so.new"
 scp -q "$SRC/src/module.json"       "$HOST:$DEST/module.json.new"
 scp -q "$SRC/src/movy_config.json"  "$HOST:$DEST/movy_config.json.new"
+scp -q "$SRC/src/ui_chain.js"       "$HOST:$DEST/ui_chain.js.new"
+scp -q "$SRC/src/ui_pages.json"     "$HOST:$DEST/ui_pages.json.new"
 
 # Atomic swap. Do NOT replace this with a direct scp.
 ssh "$HOST" "cd $DEST && \
     mv -f dsp.so.new dsp.so && \
     mv -f module.json.new module.json && \
     mv -f movy_config.json.new movy_config.json && \
-    chmod 755 dsp.so && ls -l dsp.so module.json movy_config.json"
+    mv -f ui_chain.js.new ui_chain.js && \
+    mv -f ui_pages.json.new ui_pages.json && \
+    chmod 755 dsp.so && ls -l dsp.so ui_chain.js ui_pages.json"
 
 # Loader test binary (run it on the device: cd $DEST && ./tablor_loadtest ./dsp.so)
 if [ -f "$SRC/build/tablor_loadtest" ]; then

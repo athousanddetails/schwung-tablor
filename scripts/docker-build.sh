@@ -28,6 +28,8 @@ mkdir -p dist/tablor/wavetables
 cp build/dsp.so           dist/tablor/
 cp src/module.json        dist/tablor/
 cp src/movy_config.json   dist/tablor/
+cp src/ui_chain.js        dist/tablor/
+cp src/ui_pages.json      dist/tablor/
 cp -r src/wavetables/. dist/tablor/wavetables/ 2>/dev/null || true
 (cd dist && tar -czf tablor-module.tar.gz tablor/)
 echo "Tarball: dist/tablor-module.tar.gz"

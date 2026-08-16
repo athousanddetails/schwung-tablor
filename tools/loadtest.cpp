@@ -193,14 +193,15 @@ int main(int argc, char **argv)
     api->on_midi(inst, all_off, 3, 0);
     api->set_param(inst, "flt_freq", "127");
 
-    /* ---- ui_hierarchy: the Shadow UI needs this to render ANYTHING ---- */
+    /* ---- ui_hierarchy must NOT be served: the Shadow UI's hierarchy
+     * editor would override the module's own ui_chain.js (the 9W9 rule) */
     n = api->get_param(inst, "ui_hierarchy", big, sizeof big);
-    CHECK(n > 1000 && strstr(big, "\"levels\"") && strstr(big, "\"root\""),
-          "ui_hierarchy served (%d bytes)", n);
-    CHECK(strstr(big, "\"lfo3\"") && strstr(big, "\"global\"") &&
-          strstr(big, "\"mod78\""), "hierarchy has all section levels");
-    CHECK(strstr(big, "\"filepath\"") && strstr(big, "\"live_preview\":true"),
-          "hierarchy exposes the wavetable file browser");
+    CHECK(n < 0, "ui_hierarchy NOT served (ui_chain.js owns the editor)");
+
+    /* ---- wt_files: the file list ui_chain.js steps through ---- */
+    n = api->get_param(inst, "wt_files", big, sizeof big);
+    CHECK(n > 100 && strstr(big, "Adventure Kid/") && strstr(big, ".wt2048\n"),
+          "wt_files lists user-folder tables (%d bytes)", n);
 
     /* ---- filepath selection + mid-note switching ---- */
     n = api->get_param(inst, "chain_params", big, sizeof big);
