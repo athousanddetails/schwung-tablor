@@ -173,13 +173,15 @@ BANKS = [
         row(SUB["tune"], SUB["pan"], NOISE["pan"],
             ROUTE["wt1"], ROUTE["wt2"], ROUTE["subn"]),
     ]),
-    # One envelope per page: Movy draws ONE ADSR graphic per page; two
-    # interleaved foursomes left the filter stages as odd lone ramps.
+    # Both envelopes on ONE page: a Movy envelope graphic spans one 4-cell
+    # line and a page has two lines, so VCA (line 1) + Filter (line 2) draw
+    # as two stacked ADSR graphics (the manual's env_dual). Each foursome
+    # must own its own line — split across lines it degrades to lone ramps.
     ("Env", False, [
         row(VCA["a"], VCA["d"], VCA["s"], VCA["r"],
-            VCA["vel"], VCA["retrig"]),
-        row(FEG["a"], FEG["d"], FEG["s"], FEG["r"],
-            FEG["retrig"], FILTER["key"], FILTER["vel"]),
+            FEG["a"], FEG["d"], FEG["s"], FEG["r"]),
+        row(VCA["vel"], VCA["retrig"], FEG["retrig"],
+            FILTER["key"], FILTER["vel"]),
     ]),
     ("LFO", False, [
         row(*[L1[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset", "retrig")]),
@@ -253,7 +255,7 @@ def movy_slot(p):
 MOVY_PAGE_NAMES = {
     ("Osc", 0): "Osc",    ("Osc", 1): "Unison",  ("Osc", 2): "Shape",
     ("Filter", 0): "Filter", ("Filter", 1): "Filt+",
-    ("Env", 0): "Amp Env", ("Env", 1): "Flt Env",
+    ("Env", 0): "Env", ("Env", 1): "Env+",
     ("LFO", 0): "LFO 1",  ("LFO", 1): "LFO 2",   ("LFO", 2): "LFO 3",
     ("Mod", 0): "Mod 1-2", ("Mod", 1): "Mod 3-4",
     ("Mod", 2): "Mod 5-6", ("Mod", 3): "Mod 7-8",
@@ -305,8 +307,8 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name.
     ("Osc",    2, "SHAPE"),
     ("Filter", 0, "FILTER"),
     ("Filter", 1, "FILT+"),
-    ("Env",    0, "AMP ENV"),
-    ("Env",    1, "FLT ENV"),
+    ("Env",    0, "ENV"),
+    ("Env",    1, "ENV+"),
     ("LFO",    0, "LFO 1"),
     ("LFO",    1, "LFO 2"),
     ("LFO",    2, "LFO 3"),

@@ -385,7 +385,7 @@
    ]
   },
   {
-   "name": "Amp Env",
+   "name": "Env",
    "rows": [
     [
      {
@@ -425,33 +425,6 @@
       "env": "r"
      },
      {
-      "key": "vca_vel",
-      "short": "VVEL",
-      "full": "VCA Velocity",
-      "type": "int",
-      "min": 0,
-      "max": 127
-     },
-     {
-      "key": "vca_retrig",
-      "short": "VRTR",
-      "full": "VCA Retrig",
-      "type": "enum",
-      "options": [
-       "Off",
-       "On"
-      ]
-     },
-     null,
-     null
-    ]
-   ]
-  },
-  {
-   "name": "Flt Env",
-   "rows": [
-    [
-     {
       "key": "flt_a",
       "short": "FATK",
       "full": "Flt Attack",
@@ -486,6 +459,31 @@
       "min": 0,
       "max": 127,
       "env": "r"
+     }
+    ]
+   ]
+  },
+  {
+   "name": "Env+",
+   "rows": [
+    [
+     {
+      "key": "vca_vel",
+      "short": "VVEL",
+      "full": "VCA Velocity",
+      "type": "int",
+      "min": 0,
+      "max": 127
+     },
+     {
+      "key": "vca_retrig",
+      "short": "VRTR",
+      "full": "VCA Retrig",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ]
      },
      {
       "key": "flt_retrig",
@@ -513,6 +511,8 @@
       "min": 0,
       "max": 127
      },
+     null,
+     null,
      null
     ]
    ]
@@ -1620,12 +1620,12 @@
        "VCA Decay",
        "VCA Sustain",
        "VCA Release",
-       "VCA Velocity",
-       "VCA Retrig",
        "Flt Attack",
        "Flt Decay",
        "Flt Sustain",
        "Flt Release",
+       "VCA Velocity",
+       "VCA Retrig",
        "Flt Retrig",
        "Key Track",
        "Vel Track",
@@ -1742,12 +1742,12 @@
        "VCA Decay",
        "VCA Sustain",
        "VCA Release",
-       "VCA Velocity",
-       "VCA Retrig",
        "Flt Attack",
        "Flt Decay",
        "Flt Sustain",
        "Flt Release",
+       "VCA Velocity",
+       "VCA Retrig",
        "Flt Retrig",
        "Key Track",
        "Vel Track",
@@ -1864,12 +1864,12 @@
        "VCA Decay",
        "VCA Sustain",
        "VCA Release",
-       "VCA Velocity",
-       "VCA Retrig",
        "Flt Attack",
        "Flt Decay",
        "Flt Sustain",
        "Flt Release",
+       "VCA Velocity",
+       "VCA Retrig",
        "Flt Retrig",
        "Key Track",
        "Vel Track",
@@ -1986,12 +1986,12 @@
        "VCA Decay",
        "VCA Sustain",
        "VCA Release",
-       "VCA Velocity",
-       "VCA Retrig",
        "Flt Attack",
        "Flt Decay",
        "Flt Sustain",
        "Flt Release",
+       "VCA Velocity",
+       "VCA Retrig",
        "Flt Retrig",
        "Key Track",
        "Vel Track",
@@ -2108,12 +2108,12 @@
        "VCA Decay",
        "VCA Sustain",
        "VCA Release",
-       "VCA Velocity",
-       "VCA Retrig",
        "Flt Attack",
        "Flt Decay",
        "Flt Sustain",
        "Flt Release",
+       "VCA Velocity",
+       "VCA Retrig",
        "Flt Retrig",
        "Key Track",
        "Vel Track",
@@ -2230,12 +2230,12 @@
        "VCA Decay",
        "VCA Sustain",
        "VCA Release",
-       "VCA Velocity",
-       "VCA Retrig",
        "Flt Attack",
        "Flt Decay",
        "Flt Sustain",
        "Flt Release",
+       "VCA Velocity",
+       "VCA Retrig",
        "Flt Retrig",
        "Key Track",
        "Vel Track",
@@ -2352,12 +2352,12 @@
        "VCA Decay",
        "VCA Sustain",
        "VCA Release",
-       "VCA Velocity",
-       "VCA Retrig",
        "Flt Attack",
        "Flt Decay",
        "Flt Sustain",
        "Flt Release",
+       "VCA Velocity",
+       "VCA Retrig",
        "Flt Retrig",
        "Key Track",
        "Vel Track",
@@ -2474,12 +2474,12 @@
        "VCA Decay",
        "VCA Sustain",
        "VCA Release",
-       "VCA Velocity",
-       "VCA Retrig",
        "Flt Attack",
        "Flt Decay",
        "Flt Sustain",
        "Flt Release",
+       "VCA Velocity",
+       "VCA Retrig",
        "Flt Retrig",
        "Key Track",
        "Vel Track",
