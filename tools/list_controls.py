@@ -33,6 +33,8 @@ lines = [
     "Mark anything to cut and the generator removes it everywhere at once",
     "(DSP, Movy pages, Tablor UI, presets).",
     "",
+    "@TOTAL@",
+    "",
 ]
 
 total = 0
@@ -51,8 +53,7 @@ for b in cfg["banks"]:
         lines.append(f"| {i+1} | **{s['full']}** | `{s['key']}` | {rng} | {default} |")
     lines.append("")
 
-lines.insert(4, f"**Total: {total} controls across {len(cfg['banks'])} pages.**")
-lines.insert(5, "")
-
-(ROOT / "CONTROLS.md").write_text("\n".join(lines) + "\n")
+out = "\n".join(lines).replace(
+    "@TOTAL@", f"**Total: {total} controls across {len(cfg['banks'])} pages.**")
+(ROOT / "CONTROLS.md").write_text(out + "\n")
 print(f"CONTROLS.md written: {total} controls, {len(cfg['banks'])} pages")
