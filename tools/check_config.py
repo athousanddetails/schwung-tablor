@@ -17,7 +17,7 @@ def check(cond, msg):
 cfg = json.loads((ROOT / "src/movy_config.json").read_text())
 check(cfg.get("id") == "tablor" and cfg.get("name"), "id/name present")
 banks = cfg.get("banks", [])
-check(len(banks) == 15, f"expected 15 banks, got {len(banks)}")
+check(len(banks) == 17, f"expected 17 banks, got {len(banks)}")
 for b in banks:
     # Movy: a config bank is EXACTLY one page (bankGroups is per-bank but
     # indexed per-page; multi-row banks shift every later page label)
@@ -101,7 +101,7 @@ check(pages_file.exists(), "ui_pages.json generated")
 if pages_file.exists():
     up = json.loads(pages_file.read_text())
     pages = up.get("pages", [])
-    check(len(pages) == 15, f"15 pages expected, got {len(pages)}")
+    check(len(pages) == 17, f"17 pages expected, got {len(pages)}")
     page_keys = set()
     for pg in pages:
         check(isinstance(pg.get("name"), str) and pg.get("sec"), "page has name+sec")

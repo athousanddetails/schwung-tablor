@@ -170,13 +170,16 @@ BANKS = [
     ("Filter", False, [
         row(FILTER["freq"], FILTER["res"], FILTER["env"], FILTER["type"],
             SUB["level"], SUB["wave"], NOISE["level"], NOISE["type"]),
-        row(FILTER["key"], FILTER["vel"], SUB["tune"], SUB["pan"],
-            NOISE["pan"], ROUTE["wt1"], ROUTE["wt2"], ROUTE["subn"]),
+        row(SUB["tune"], SUB["pan"], NOISE["pan"],
+            ROUTE["wt1"], ROUTE["wt2"], ROUTE["subn"]),
     ]),
+    # One envelope per page: Movy draws ONE ADSR graphic per page; two
+    # interleaved foursomes left the filter stages as odd lone ramps.
     ("Env", False, [
         row(VCA["a"], VCA["d"], VCA["s"], VCA["r"],
-            FEG["a"], FEG["d"], FEG["s"], FEG["r"]),
-        row(VCA["vel"], VCA["retrig"], FEG["retrig"]),
+            VCA["vel"], VCA["retrig"]),
+        row(FEG["a"], FEG["d"], FEG["s"], FEG["r"],
+            FEG["retrig"], FILTER["key"], FILTER["vel"]),
     ]),
     ("LFO", False, [
         row(*[L1[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset", "retrig")]),
@@ -204,6 +207,23 @@ def all_params():
                 if s and s["key"] not in seen:
                     seen.add(s["key"]); out.append(s)
     return out
+
+# ---------------------------------------------------------------- user macros
+# 8 assignable macros as REAL DSP params, so the User page exists in Movy AND
+# in ui_chain, assignments live inside patches, and a Movy LFO can drive a
+# macro. u{i} is a 0..127 pot; u{i}_target picks any parameter by name; the
+# DSP writes through (and back-syncs the pot when the target changes).
+BASE_PARAMS = all_params()
+USER_TARGETS = ["None"] + [p["full"] for p in BASE_PARAMS if p["type"] != "file"]
+
+USER_POTS, USER_SELS = [], []
+for i in range(1, 9):
+    USER_POTS.append(pot(f"u{i}", f"USR{i}", f"Macro {i}", 0))
+    USER_SELS.append(enum(f"u{i}_target", f"TGT{i}", f"Macro {i} Target",
+                          USER_TARGETS, 0, automatable=False))
+
+BANKS.append(("User", False, [row(*USER_POTS)]))
+BANKS.append(("UMap", True,  [row(*USER_SELS)]))
 
 PARAMS = all_params()
 
@@ -233,11 +253,12 @@ def movy_slot(p):
 MOVY_PAGE_NAMES = {
     ("Osc", 0): "Osc",    ("Osc", 1): "Unison",  ("Osc", 2): "Shape",
     ("Filter", 0): "Filter", ("Filter", 1): "Filt+",
-    ("Env", 0): "Env",    ("Env", 1): "Env+",
+    ("Env", 0): "Amp Env", ("Env", 1): "Flt Env",
     ("LFO", 0): "LFO 1",  ("LFO", 1): "LFO 2",   ("LFO", 2): "LFO 3",
     ("Mod", 0): "Mod 1-2", ("Mod", 1): "Mod 3-4",
     ("Mod", 2): "Mod 5-6", ("Mod", 3): "Mod 7-8",
     ("Global", 0): "Global",
+    ("User", 0): "User",  ("UMap", 0): "U.Map",
 }
 
 movy_banks = []
@@ -284,8 +305,8 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name.
     ("Osc",    2, "SHAPE"),
     ("Filter", 0, "FILTER"),
     ("Filter", 1, "FILT+"),
-    ("Env",    0, "ENV"),
-    ("Env",    1, "ENV+"),
+    ("Env",    0, "AMP ENV"),
+    ("Env",    1, "FLT ENV"),
     ("LFO",    0, "LFO 1"),
     ("LFO",    1, "LFO 2"),
     ("LFO",    2, "LFO 3"),
@@ -294,6 +315,8 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name.
     ("Mod",    2, "MOD 5-6"),
     ("Mod",    3, "MOD 7-8"),
     ("Global", 0, "GLOBAL"),
+    ("User",   0, "USER"),
+    ("UMap",   0, "U.MAP"),
 ]
 
 def page_slot(p):
@@ -407,6 +430,25 @@ lines += [
     "/* NOTE: ui_hierarchy is deliberately NOT served — the Shadow UI's",
     " * hierarchy editor would take precedence over the module's own",
     " * ui_chain.js (the 9W9 rule). Movy uses movy_config + chain_params. */",
+    "",
+]
+
+# User-macro wiring: pot index, selector index, and option->param-index map.
+target_map = ["-1"]
+for p in BASE_PARAMS:
+    if p["type"] != "file":
+        target_map.append(f'TB_P_{p["key"].upper()}')
+lines += [
+    "/* User macros: u{i} pots write through to their selected target. */",
+    "#define TB_USER_MACROS 8",
+    "static const int tb_user_pots[TB_USER_MACROS] = {",
+    "    " + ", ".join(f"TB_P_U{i}" for i in range(1, 9)) + " };",
+    "static const int tb_user_sels[TB_USER_MACROS] = {",
+    "    " + ", ".join(f"TB_P_U{i}_TARGET" for i in range(1, 9)) + " };",
+    f"/* selector option index -> param index (0 = None) */",
+    f"static const int tb_user_target_map[{len(target_map)}] = {{",
+    "    " + ",\n    ".join(", ".join(target_map[i:i+6])
+                            for i in range(0, len(target_map), 6)) + " };",
     "",
     "#endif /* TABLOR_PARAMS_H */",
 ]

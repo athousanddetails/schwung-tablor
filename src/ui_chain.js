@@ -38,8 +38,8 @@
     var lastHeader = "";   /* right-aligned header text (value readout) */
     var wtFiles = null;    /* cached wt_files list */
     var wtFilesAge = 0;
-    var userMap = [null, null, null, null, null, null, null, null];
-    var assignFlash = 0;
+    var userPage = -1;     /* index of the USER page (u1..u8 macro pots) */
+    var umapPage = -1;     /* index of the U.MAP page (u*_target enums) */
 
     function has(fn) { return typeof globalThis[fn] === "function"; }
     function uiSlot() { return has("shadow_get_ui_slot") ? shadow_get_ui_slot() : 0; }
@@ -72,42 +72,35 @@
                 SECTIONS.push({ name: PAGES[i].sec, firstPage: i });
                 lastSec = PAGES[i].sec;
             }
+            if (PAGES[i].name === "USER") userPage = i;
+            if (PAGES[i].name === "U.MAP") umapPage = i;
             var slots = PAGES[i].slots || [];
             for (var s = 0; s < slots.length; s++)
                 if (slots[s]) ALLPARAMS.push(slots[s]);
         }
-        /* USER page is ours, appended after the generated ones */
-        PAGES.push({ name: "USER", sec: "User", slots: userSlots() });
-        SECTIONS.push({ name: "User", firstPage: PAGES.length - 1 });
         return true;
     }
 
-    function userSlots() {
-        var out = [];
-        for (var i = 0; i < 8; i++) {
-            var key = userMap[i];
-            var slot = null;
-            if (key)
-                for (var j = 0; j < ALLPARAMS.length; j++)
-                    if (ALLPARAMS[j].k === key) { slot = ALLPARAMS[j]; break; }
-            out.push(slot);
-        }
-        return out;
+    /* The USER page's macro pots proxy their targets (DSP params, saved in
+     * the patch). The label shown under macro knob i is its target's short
+     * name, read from the U.MAP selector. */
+    function macroTargetSlot(i) {
+        if (umapPage < 0) return null;
+        var sel = PAGES[umapPage].slots[i];
+        if (!sel) return null;
+        var opt = vals[sel.k] | 0;                    /* 0 = None */
+        if (opt <= 0) return null;
+        var name = sel.options[opt];
+        for (var j = 0; j < ALLPARAMS.length; j++)
+            if (ALLPARAMS[j].full === name) return ALLPARAMS[j];
+        return null;
     }
 
-    function loadUserMap() {
-        var txt = has("host_read_file")
-            ? host_read_file(MODULE_DIR + "/user_map.json") : null;
-        if (!txt) return;
-        try {
-            var m = JSON.parse(txt);
-            if (m && m.length === 8) userMap = m;
-        } catch (e) {}
-    }
-
-    function saveUserMap() {
-        if (has("host_write_file"))
-            host_write_file(MODULE_DIR + "/user_map.json", JSON.stringify(userMap));
+    function loadMacroTargets() {
+        if (umapPage < 0) return;
+        var slots = PAGES[umapPage].slots;
+        for (var i = 0; i < slots.length; i++)
+            if (slots[i]) vals[slots[i].k] = readParam(slots[i]);
     }
 
     function readParam(slot) {
@@ -130,6 +123,7 @@
         var slots = PAGES[pageIdx].slots;
         for (var i = 0; i < slots.length; i++)
             if (slots[i]) vals[slots[i].k] = readParam(slots[i]);
+        if (pageIdx === userPage) loadMacroTargets();  /* labels need targets */
         dirty = true;
     }
 
@@ -195,22 +189,19 @@
         dirty = true;
     }
 
-    /* USER page: Shift+turn cycles the assignment through every parameter. */
+    /* USER page: Shift+turn cycles the macro's TARGET (the u{i}_target
+     * enum — a real DSP param, so assignments live inside the patch). */
     function assignUserSlot(ki, delta) {
-        var cur = userMap[ki];
-        var idx = -1;
-        for (var i = 0; i < ALLPARAMS.length; i++)
-            if (ALLPARAMS[i].k === cur) { idx = i; break; }
-        idx += delta > 0 ? 1 : -1;
-        if (idx < -1) idx = ALLPARAMS.length - 1;
-        if (idx >= ALLPARAMS.length) idx = -1;      /* -1 = unassigned */
-        userMap[ki] = idx < 0 ? null : ALLPARAMS[idx].k;
-        PAGES[PAGES.length - 1].slots = userSlots();
-        saveUserMap();
-        loadPage();
+        if (umapPage < 0) return;
+        var sel = PAGES[umapPage].slots[ki];
+        if (!sel) return;
+        var n = sel.options.length;
+        var v = ((vals[sel.k] | 0) + (delta > 0 ? 1 : -1) + n) % n;
+        vals[sel.k] = v;
+        setParam(sel.k, v);
+        loadPage();                     /* DSP back-syncs the macro pot */
         lastTouched = ki;
-        lastHeader = idx < 0 ? "--" : ALLPARAMS[idx].full;
-        assignFlash = Date.now();
+        lastHeader = v === 0 ? "--" : sel.options[v];
         dirty = true;
     }
 
@@ -291,14 +282,22 @@
             print(126 - text_width(t), 1, t, 0);
         }
 
-        var isUser = pageIdx === PAGES.length - 1;
+        var isUser = pageIdx === userPage;
         for (var i = 0; i < 8; i++) {
             var slot = page.slots[i];
             var x = (i % 4) * 32;
             var y = i < 4 ? 12 : 37;
-            if (!slot) {
-                if (isUser) print(x + 13, y + 6, "--", 1);
-                continue;
+            if (!slot) continue;
+            /* macro pots: unassigned slots show --, assigned ones wear
+             * their target's short name */
+            var lbl = slot.n;
+            if (isUser) {
+                var tgt = macroTargetSlot(i);
+                if (!tgt) {
+                    print(x + 13, y + 6, "--", 1);
+                    continue;
+                }
+                lbl = tgt.n;
             }
             var v = vals[slot.k];
             if (slot.t === "file") {
@@ -316,7 +315,7 @@
                 var v01 = range > 0 ? ((v - (slot.min | 0)) / range) : 0;
                 drawDial(x + 15, y + 6, v01);
             }
-            var lbl = slot.n.substring(0, 5);
+            lbl = lbl.substring(0, 5);
             print(x + ((32 - text_width(lbl)) >> 1), y + 14, lbl, 1);
         }
 
@@ -328,17 +327,20 @@
 
     function init() {
         mySlot = uiSlot();
-        loadUserMap();
         if (!loadPages()) {
             PAGES = [{ name: "NO DATA", sec: "?", slots: [] }];
             SECTIONS = [{ name: "?", firstPage: 0 }];
         }
+        loadMacroTargets();
         /* The USER page becomes the home page once the user has built one —
          * their own 8 knobs greet them; everything else is a jog away. */
         var hasAssignments = false;
-        for (var i = 0; i < 8; i++)
-            if (userMap[i]) hasAssignments = true;
-        selectPage(hasAssignments ? PAGES.length - 1 : 0, false);
+        if (umapPage >= 0) {
+            var slots = PAGES[umapPage].slots;
+            for (var i = 0; i < slots.length; i++)
+                if (slots[i] && (vals[slots[i].k] | 0) > 0) hasAssignments = true;
+        }
+        selectPage(hasAssignments && userPage >= 0 ? userPage : 0, false);
         if (has("host_announce_screenreader"))
             host_announce_screenreader("Tablor");
     }
@@ -346,10 +348,6 @@
     function tick() {
         var shown = !has("shadow_get_display_mode") || shadow_get_display_mode() === 1;
         if (!shown || !isFocused()) return;
-        if (assignFlash && Date.now() - assignFlash > 1200) {
-            assignFlash = 0;
-            dirty = true;
-        }
         if (dirty) draw();
     }
 
@@ -367,7 +365,7 @@
         /* knobs 1-8 */
         if (d1 >= 71 && d1 <= 78 && d2 > 0) {
             var ki = d1 - 71;
-            if (shiftHeld && pageIdx === PAGES.length - 1)
+            if (shiftHeld && pageIdx === userPage)
                 assignUserSlot(ki, relDelta(d2));
             else
                 adjustKnob(ki, relDelta(d2));
