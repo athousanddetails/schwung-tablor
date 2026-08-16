@@ -32,6 +32,7 @@ inline float velocityToGain(float velocity, float sensitivity)
 }
 
 inline constexpr int kBlock = 128;
+inline constexpr int kLfos = 2;
 
 /* Everything a voice needs from the engine each block. */
 struct VoiceContext {
@@ -100,30 +101,21 @@ public:
 
         updateParams(c, 0);
 
-        /* oscillator phases: gin's retrig logic */
+        /* oscillator phases: free-running (the old retrig-off default —
+         * the retrig switch was cut from the surface) */
         for (int o = 0; o < 2; o++) {
             auto &osc = o == 0 ? osc1 : osc2;
-            bool retrig = P[o == 0 ? TB_P_WT1_RETRIG : TB_P_WT2_RETRIG] > 0.5f;
-            int uni = (int) P[o == 0 ? TB_P_WT1_UNI : TB_P_WT2_UNI];
             float phases[8];
-            for (int i = 0; i < 8; i++) {
-                if (uni <= 1)
-                    phases[i] = retrig ? 0.0f : (float) rand() / (float) RAND_MAX;
-                else if (retrig)
-                    phases[i] = 1.0f / (float) uni * (float) i;
-                else
-                    phases[i] = (float) rand() / (float) RAND_MAX;
-            }
+            for (int i = 0; i < 8; i++)
+                phases[i] = (float) rand() / (float) RAND_MAX;
             osc.noteOn(phases, 8);
         }
         sub.noteOn(0.0f);
         noise.noteOn(0.0f);
 
         filterADSR.noteOn();
-        for (int i = 0; i < 3; i++) {
-            bool retrig = P[lfoParam(i, 7)] > 0.5f;   /* lfoN_retrig */
-            lfos[i].noteOn(retrig ? -1.0f : (float) rand() / (float) RAND_MAX);
-        }
+        for (int i = 0; i < kLfos; i++)
+            lfos[i].noteOn(-1.0f);      /* retrig (the old default) */
 
         adsr.reset();
         adsr.noteOn();
@@ -142,9 +134,9 @@ public:
             noteSmoother.setValueUnsmoothed((float) note / 127.0f);
         }
         bool legato = P[TB_P_LEGATO] > 0.5f;
-        if (!legato) {
-            if (P[TB_P_FLT_RETRIG] > 0.5f) filterADSR.noteOn();
-            if (P[TB_P_VCA_RETRIG] > 0.5f) adsr.noteOn();
+        if (!legato) {              /* env retrig switches cut: always retrig */
+            filterADSR.noteOn();
+            adsr.noteOn();
         }
     }
 
@@ -176,22 +168,15 @@ public:
 
         const float *P = c.pots;
 
+        /* Routing switches cut: every source runs through the filter. */
         if (oscGain[0] > 0.0f)
-            osc1.processAdding(oscNote[0], vp1,
-                               P[TB_P_RT_WT1] > 0.5f ? preL : postL,
-                               P[TB_P_RT_WT1] > 0.5f ? preR : postR, n);
+            osc1.processAdding(oscNote[0], vp1, preL, preR, n);
         if (oscGain[1] > 0.0f)
-            osc2.processAdding(oscNote[1], vp2,
-                               P[TB_P_RT_WT2] > 0.5f ? preL : postL,
-                               P[TB_P_RT_WT2] > 0.5f ? preR : postR, n);
-
-        bool subPre = P[TB_P_RT_SUBNOISE] > 0.5f;
+            osc2.processAdding(oscNote[1], vp2, preL, preR, n);
         if (subParams.leftGain + subParams.rightGain > 0.0f)
-            sub.processAdding(subNote, subParams,
-                              subPre ? preL : postL, subPre ? preR : postR, n);
+            sub.processAdding(subNote, subParams, preL, preR, n);
         if (noiseParams.leftGain + noiseParams.rightGain > 0.0f)
-            noise.processAdding(60.0f, noiseParams,
-                                subPre ? preL : postL, subPre ? preR : postR, n);
+            noise.processAdding(60.0f, noiseParams, preL, preR, n);
 
         /* velocity */
         float vgain = velocityToGain(velocity, ampVelTrack) * ampModGain;
@@ -207,9 +192,9 @@ public:
             float post = 0; for (int i = 0; i < n; i++) post += preL[i] * preL[i];
             static int dbg = 0;
             if (dbg++ % 100 == 0)
-                printf("[voice] filt f=%.1f preRMS=%.4f postRMS=%.4f rt1=%.0f gain0=%.2f\n",
+                printf("[voice] filt f=%.1f preRMS=%.4f postRMS=%.4f gain0=%.2f\n",
                        filter.getFrequency(), std::sqrt(pre / n), std::sqrt(post / n),
-                       P[TB_P_RT_WT1], oscGain[0]);
+                       oscGain[0]);
         }
 #else
         filter.process(preL, preR, n);
@@ -237,8 +222,8 @@ private:
     static int lfoParam(int lfo, int field)
     {
         /* fields: 0 shape, 1 rate, 2 sync, 3 beat, 4 depth, 5 phase,
-         * 6 offset, 7 retrig — contiguous per LFO in params.h */
-        static const int base[3] = { TB_P_LFO1_SHAPE, TB_P_LFO2_SHAPE, TB_P_LFO3_SHAPE };
+         * 6 offset — contiguous per LFO in params.h */
+        static const int base[2] = { TB_P_LFO1_SHAPE, TB_P_LFO2_SHAPE };
         return base[lfo] + field;
     }
 
@@ -252,7 +237,7 @@ private:
             1.0f, 4.0f/3, 1.5f, 2.0f, 8.0f/3, 3.0f, 4.0f, 8.0f };
 
         ModSources src;
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < kLfos; i++) {
             LFO::Parameters lp;
             lp.waveShape = (LFO::WaveShape) ((int) P[lfoParam(i, 0)] + 1); /* skip none */
             float rate = potLfoRate(P[lfoParam(i, 1)]);
@@ -305,7 +290,6 @@ private:
             const int kPos    = o == 0 ? TB_P_WT1_POS : TB_P_WT2_POS;
             const int kLevel  = o == 0 ? TB_P_WT1_LEVEL : TB_P_WT2_LEVEL;
             const int kTune   = o == 0 ? TB_P_WT1_TUNE : TB_P_WT2_TUNE;
-            const int kFine   = o == 0 ? TB_P_WT1_FINE : TB_P_WT2_FINE;
             const int kUni    = o == 0 ? TB_P_WT1_UNI : TB_P_WT2_UNI;
             const int kDet    = o == 0 ? TB_P_WT1_DETUNE : TB_P_WT2_DETUNE;
             const int kSpread = o == 0 ? TB_P_WT1_SPREAD : TB_P_WT2_SPREAD;
@@ -322,9 +306,7 @@ private:
             const int dFrm = o == 0 ? DST_WT1_FORMANT : DST_WT2_FORMANT;
             const int dPan = o == 0 ? DST_WT1_PAN : DST_WT2_PAN;
 
-            oscNote[o] = baseNote + P[kTune]
-                       + P[kFine] / 100.0f
-                       + modOff.o[dTun] * 12.0f;
+            oscNote[o] = baseNote + P[kTune] + modOff.o[dTun] * 12.0f;
 
             vp.voices   = std::clamp((int) P[kUni], 1, 4);
             vp.position = std::clamp(pot01(P[kPos]) + modOff.o[dPos], 0.0f, 1.0f);
@@ -341,7 +323,7 @@ private:
         subNote = baseNote + P[TB_P_SUB_TUNE];
         float subLvl = std::clamp(potSquared(P[TB_P_SUB_LEVEL]) + modOff.o[DST_SUB_LEVEL],
                                   0.0f, 1.0f);
-        float subPan = potBipolar(P[TB_P_SUB_PAN]);
+        float subPan = 0.0f;                 /* pan control cut: centered */
         switch ((int) P[TB_P_SUB_WAVE]) {
         case 0: subParams.wave = Wave::sine; break;
         case 1: subParams.wave = Wave::triangle; break;
@@ -355,7 +337,7 @@ private:
 
         float nzLvl = std::clamp(potSquared(P[TB_P_NOISE_LEVEL]) + modOff.o[DST_NOISE_LEVEL],
                                  0.0f, 1.0f);
-        float nzPan = potBipolar(P[TB_P_NOISE_PAN]);
+        float nzPan = 0.0f;                  /* pan control cut: centered */
         noiseParams.wave = (int) P[TB_P_NOISE_TYPE] == 0 ? Wave::whiteNoise : Wave::pinkNoise;
         noiseParams.leftGain  = nzLvl * (1.0f - nzPan);
         noiseParams.rightGain = nzLvl * (1.0f + nzPan);
@@ -400,7 +382,7 @@ private:
     StereoOscillator::Params subParams, noiseParams;
     Filter filter;
     AnalogADSR filterADSR, adsr;
-    LFO lfos[3];
+    LFO lfos[kLfos];
     ValueSmoother<float> noteSmoother;
     ModOffsets modOff;
 

@@ -29,13 +29,13 @@ RETRIG       = ["Free", "Retrig"]
 VOICE_MODES  = ["Poly", "Mono"]
 GLIDE_MODES  = ["Off", "Glissando", "Portamento"]
 
-MOD_SRC = ["None", "LFO 1", "LFO 2", "LFO 3", "Filter EG", "VCA EG",
+MOD_SRC = ["None", "LFO 1", "LFO 2", "Filter EG", "VCA EG",
            "Velocity", "Note", "Mod Wheel", "Aftertouch", "Pitch Bend", "Random"]
 MOD_DST = ["None",
            "WT1 Pos", "WT2 Pos", "WT1 Level", "WT2 Level", "WT1 Tune", "WT2 Tune",
            "WT1 Bend", "WT2 Bend", "WT1 Formant", "WT2 Formant", "WT1 Pan", "WT2 Pan",
            "Filter Freq", "Filter Res", "Sub Level", "Noise Level", "Amp",
-           "LFO1 Rate", "LFO2 Rate", "LFO3 Rate"]
+           "LFO1 Rate", "LFO2 Rate"]
 
 # Wavetable selection is a FILEPATH param: Schwung's Shadow UI opens its real
 # file browser (folders + live preview while the cursor moves), Movy opens its
@@ -65,20 +65,21 @@ def hint(p, **kw):
     q = dict(p); q["_movy"] = kw; return q
 
 # ---------------------------------------------------------------- the surface
+# Trimmed 2026-08-16 per Gus: no fine, no retrig anywhere, no sub/noise pan,
+# no filter routing switches, 4 mod slots, 2 LFOs. Behaviors hardcode to the
+# old defaults in the DSP.
 def osc(n):
     return dict(
         table  = wtfile(f"wt{n}_table", f"TBL{n}", f"WT{n} Table"),
         pos    = pot(f"wt{n}_pos",     f"POS{n}",  f"WT{n} Pos", 0),
         level  = pot(f"wt{n}_level",   f"LVL{n}",  f"WT{n} Level", 100 if n == 1 else 0),
         tune   = num(f"wt{n}_tune",    f"TUN{n}",  f"WT{n} Tune", -24, 24, 0),
-        fine   = num(f"wt{n}_fine",    f"FIN{n}",  f"WT{n} Fine", -50, 50, 0),
         uni    = num(f"wt{n}_uni",     f"UNI{n}",  f"WT{n} Unison", 1, 4, 1),
         detune = pot(f"wt{n}_detune",  f"DET{n}",  f"WT{n} Detune", 0),
         spread = pot(f"wt{n}_spread",  f"SPR{n}",  f"WT{n} Spread", 0),
         pan    = pot(f"wt{n}_pan",     f"PAN{n}",  f"WT{n} Pan", 64),
         bend   = pot(f"wt{n}_bend",    f"BND{n}",  f"WT{n} Bend", 64),
         formant= pot(f"wt{n}_formant", f"FRM{n}",  f"WT{n} Formant", 64),
-        retrig = enum(f"wt{n}_retrig", f"RTR{n}",  f"WT{n} Retrig", RETRIG, 0),
     )
 
 O1, O2 = osc(1), osc(2)
@@ -95,17 +96,10 @@ SUB = dict(
     level = pot("sub_level", "SUB",  "Sub Level", 0),
     wave  = enum("sub_wave", "SUBW", "Sub Wave", SUB_WAVES, 0),
     tune  = num("sub_tune",  "SUBT", "Sub Tune", -24, 24, -12),
-    pan   = pot("sub_pan",   "SUBP", "Sub Pan", 64),
 )
 NOISE = dict(
     level = pot("noise_level", "NOIS", "Noise Level", 0),
     type  = enum("noise_type", "NTYP", "Noise Type", NOISE_TYPES, 0),
-    pan   = pot("noise_pan",   "NPAN", "Noise Pan", 64),
-)
-ROUTE = dict(
-    wt1 = enum("rt_wt1",      "FLT1", "WT1 to Filter", ONOFF, 1),
-    wt2 = enum("rt_wt2",      "FLT2", "WT2 to Filter", ONOFF, 1),
-    subn= enum("rt_subnoise", "FLTS", "Sub/Noise Filt", ONOFF, 1),
 )
 VCA = dict(
     # NO env hints: Movy's roleOf() gives every hinted stage qualifier "" —
@@ -116,15 +110,13 @@ VCA = dict(
     d = pot("vca_d", "DEC", "VCA Decay", 64),
     s = pot("vca_s", "SUS", "VCA Sustain", 127),
     r = pot("vca_r", "REL", "VCA Release", 24),
-    vel    = pot("vca_vel", "VVEL", "VCA Velocity", 100),
-    retrig = enum("vca_retrig", "VRTR", "VCA Retrig", ONOFF, 1),
+    vel = pot("vca_vel", "VVEL", "VCA Velocity", 100),
 )
 FEG = dict(
     a = pot("flt_a", "FATK", "Flt Attack", 0),
     d = pot("flt_d", "FDEC", "Flt Decay", 64),
     s = pot("flt_s", "FSUS", "Flt Sustain", 64),
     r = pot("flt_r", "FREL", "Flt Release", 24),
-    retrig = enum("flt_retrig", "FRTR", "Flt Retrig", ONOFF, 1),
 )
 def lfo(n):
     return dict(
@@ -135,16 +127,15 @@ def lfo(n):
         depth = hint(pot(f"lfo{n}_depth", f"DEP{n}", f"LFO{n} Depth", 127), lfo="depth"),
         phase = hint(pot(f"lfo{n}_phase", f"PHA{n}", f"LFO{n} Phase", 0), lfo="phase"),
         offset= pot(f"lfo{n}_offset", f"OFF{n}", f"LFO{n} Offset", 64),
-        retrig= hint(enum(f"lfo{n}_retrig", f"RTG{n}", f"LFO{n} Retrig", RETRIG, 1), lfo="retrig"),
     )
-L1, L2, L3 = lfo(1), lfo(2), lfo(3)
+L1, L2 = lfo(1), lfo(2)
 
 def mod(n):
     return [enum(f"m{n}_src", f"SRC{n}", f"Mod{n} Source", MOD_SRC, 0, automatable=False),
             enum(f"m{n}_dst", f"DST{n}", f"Mod{n} Dest",   MOD_DST, 0, automatable=False),
             pot (f"m{n}_amt", f"AMT{n}", f"Mod{n} Amount", 64) | {"automatable": False},
             enum(f"m{n}_on",  f"ON{n}",  f"Mod{n} On",     ONOFF, 0, automatable=False)]
-MODS = [mod(n) for n in range(1, 9)]
+MODS = [mod(n) for n in range(1, 5)]
 
 GLOBAL = dict(
     mode   = enum("voice_mode", "MODE", "Voice Mode", VOICE_MODES, 0),
@@ -168,14 +159,12 @@ BANKS = [
             O1["level"], O2["level"], O1["tune"], O2["tune"]),
         row(O1["uni"], O1["detune"], O1["spread"], O1["pan"],
             O2["uni"], O2["detune"], O2["spread"], O2["pan"]),
-        row(O1["bend"], O1["formant"], O1["fine"], O1["retrig"],
-            O2["bend"], O2["formant"], O2["fine"], O2["retrig"]),
+        row(O1["bend"], O1["formant"], O2["bend"], O2["formant"],
+            SUB["tune"]),
     ]),
     ("Filter", False, [
         row(FILTER["freq"], FILTER["res"], FILTER["env"], FILTER["type"],
             SUB["level"], SUB["wave"], NOISE["level"], NOISE["type"]),
-        row(SUB["tune"], SUB["pan"], NOISE["pan"],
-            ROUTE["wt1"], ROUTE["wt2"], ROUTE["subn"]),
     ]),
     # Both envelopes on ONE page: a Movy envelope graphic spans one 4-cell
     # line and a page has two lines, so VCA (line 1) + Filter (line 2) draw
@@ -184,19 +173,15 @@ BANKS = [
     ("Env", False, [
         row(VCA["a"], VCA["d"], VCA["s"], VCA["r"],
             FEG["a"], FEG["d"], FEG["s"], FEG["r"]),
-        row(VCA["vel"], VCA["retrig"], FEG["retrig"],
-            FILTER["key"], FILTER["vel"]),
+        row(VCA["vel"], FILTER["key"], FILTER["vel"]),
     ]),
     ("LFO", False, [
-        row(*[L1[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset", "retrig")]),
-        row(*[L2[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset", "retrig")]),
-        row(*[L3[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset", "retrig")]),
+        row(*[L1[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset")]),
+        row(*[L2[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset")]),
     ]),
     ("Mod", False, [
         row(*(MODS[0] + MODS[1])),
         row(*(MODS[2] + MODS[3])),
-        row(*(MODS[4] + MODS[5])),
-        row(*(MODS[6] + MODS[7])),
     ]),
     ("Global", True, [
         row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"], GLOBAL["gmode"],
@@ -258,11 +243,10 @@ def movy_slot(p):
 # shifts every following page label. One bank per page, named like ui_chain.
 MOVY_PAGE_NAMES = {
     ("Osc", 0): "Osc",    ("Osc", 1): "Unison",  ("Osc", 2): "Shape",
-    ("Filter", 0): "Filter", ("Filter", 1): "Filt+",
+    ("Filter", 0): "Filter",
     ("Env", 0): "Env", ("Env", 1): "Env+",
-    ("LFO", 0): "LFO 1",  ("LFO", 1): "LFO 2",   ("LFO", 2): "LFO 3",
+    ("LFO", 0): "LFO 1",  ("LFO", 1): "LFO 2",
     ("Mod", 0): "Mod 1-2", ("Mod", 1): "Mod 3-4",
-    ("Mod", 2): "Mod 5-6", ("Mod", 3): "Mod 7-8",
     ("Global", 0): "Global",
     ("User", 0): "User",  ("UMap", 0): "U.Map",
 }
@@ -310,16 +294,12 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name.
     ("Osc",    1, "UNISON"),
     ("Osc",    2, "SHAPE"),
     ("Filter", 0, "FILTER"),
-    ("Filter", 1, "FILT+"),
     ("Env",    0, "ENV"),
     ("Env",    1, "ENV+"),
     ("LFO",    0, "LFO 1"),
     ("LFO",    1, "LFO 2"),
-    ("LFO",    2, "LFO 3"),
     ("Mod",    0, "MOD 1-2"),
     ("Mod",    1, "MOD 3-4"),
-    ("Mod",    2, "MOD 5-6"),
-    ("Mod",    3, "MOD 7-8"),
     ("Global", 0, "GLOBAL"),
     ("User",   0, "USER"),
     ("UMap",   0, "U.MAP"),

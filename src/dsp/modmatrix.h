@@ -11,7 +11,7 @@
 namespace tb {
 
 enum ModSrc {
-    SRC_NONE = 0, SRC_LFO1, SRC_LFO2, SRC_LFO3, SRC_FILTER_EG, SRC_VCA_EG,
+    SRC_NONE = 0, SRC_LFO1, SRC_LFO2, SRC_FILTER_EG, SRC_VCA_EG,
     SRC_VELOCITY, SRC_NOTE, SRC_MODWHEEL, SRC_AFTERTOUCH, SRC_PITCHBEND,
     SRC_RANDOM, SRC_COUNT
 };
@@ -22,7 +22,7 @@ enum ModDst {
     DST_WT1_TUNE, DST_WT2_TUNE, DST_WT1_BEND, DST_WT2_BEND,
     DST_WT1_FORMANT, DST_WT2_FORMANT, DST_WT1_PAN, DST_WT2_PAN,
     DST_FLT_FREQ, DST_FLT_RES, DST_SUB_LEVEL, DST_NOISE_LEVEL, DST_AMP,
-    DST_LFO1_RATE, DST_LFO2_RATE, DST_LFO3_RATE, DST_COUNT
+    DST_LFO1_RATE, DST_LFO2_RATE, DST_COUNT
 };
 
 struct ModSlot {
@@ -32,7 +32,7 @@ struct ModSlot {
     bool  on = false;
 };
 
-constexpr int kModSlots = 8;
+constexpr int kModSlots = 4;
 
 /* Per-voice source snapshot for one block. All values -1..1 or 0..1. */
 struct ModSources {

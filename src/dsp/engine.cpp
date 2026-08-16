@@ -26,8 +26,7 @@ Engine::Engine()
 void Engine::syncModSlots()
 {
     static const int base[kModSlots] = {
-        TB_P_M1_SRC, TB_P_M2_SRC, TB_P_M3_SRC, TB_P_M4_SRC,
-        TB_P_M5_SRC, TB_P_M6_SRC, TB_P_M7_SRC, TB_P_M8_SRC };
+        TB_P_M1_SRC, TB_P_M2_SRC, TB_P_M3_SRC, TB_P_M4_SRC };
     for (int i = 0; i < kModSlots; i++) {
         modSlots[i].src    = (int) pots[base[i] + 0];
         modSlots[i].dst    = (int) pots[base[i] + 1];
