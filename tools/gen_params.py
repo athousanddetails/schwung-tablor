@@ -108,18 +108,22 @@ ROUTE = dict(
     subn= enum("rt_subnoise", "FLTS", "Sub/Noise Filt", ONOFF, 1),
 )
 VCA = dict(
-    a = hint(pot("vca_a", "ATK", "VCA Attack", 0),    env="a"),
-    d = hint(pot("vca_d", "DEC", "VCA Decay", 64),    env="d"),
-    s = hint(pot("vca_s", "SUS", "VCA Sustain", 127), env="s"),
-    r = hint(pot("vca_r", "REL", "VCA Release", 24),  env="r"),
+    # NO env hints: Movy's roleOf() gives every hinted stage qualifier "" —
+    # two hinted foursomes then collapse into ONE group and the loser draws
+    # as lone ramps. Unhinted, Movy parses the LABELS ("VCA Attack" -> Amp
+    # group, "Flt Attack" -> Filter group) and stacks two named envelopes.
+    a = pot("vca_a", "ATK", "VCA Attack", 0),
+    d = pot("vca_d", "DEC", "VCA Decay", 64),
+    s = pot("vca_s", "SUS", "VCA Sustain", 127),
+    r = pot("vca_r", "REL", "VCA Release", 24),
     vel    = pot("vca_vel", "VVEL", "VCA Velocity", 100),
     retrig = enum("vca_retrig", "VRTR", "VCA Retrig", ONOFF, 1),
 )
 FEG = dict(
-    a = hint(pot("flt_a", "FATK", "Flt Attack", 0),    env="a"),
-    d = hint(pot("flt_d", "FDEC", "Flt Decay", 64),    env="d"),
-    s = hint(pot("flt_s", "FSUS", "Flt Sustain", 64),  env="s"),
-    r = hint(pot("flt_r", "FREL", "Flt Release", 24),  env="r"),
+    a = pot("flt_a", "FATK", "Flt Attack", 0),
+    d = pot("flt_d", "FDEC", "Flt Decay", 64),
+    s = pot("flt_s", "FSUS", "Flt Sustain", 64),
+    r = pot("flt_r", "FREL", "Flt Release", 24),
     retrig = enum("flt_retrig", "FRTR", "Flt Retrig", ONOFF, 1),
 )
 def lfo(n):

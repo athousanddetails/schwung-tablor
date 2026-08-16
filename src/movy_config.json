@@ -394,8 +394,7 @@
       "full": "VCA Attack",
       "type": "int",
       "min": 0,
-      "max": 127,
-      "env": "a"
+      "max": 127
      },
      {
       "key": "vca_d",
@@ -403,8 +402,7 @@
       "full": "VCA Decay",
       "type": "int",
       "min": 0,
-      "max": 127,
-      "env": "d"
+      "max": 127
      },
      {
       "key": "vca_s",
@@ -412,8 +410,7 @@
       "full": "VCA Sustain",
       "type": "int",
       "min": 0,
-      "max": 127,
-      "env": "s"
+      "max": 127
      },
      {
       "key": "vca_r",
@@ -421,8 +418,7 @@
       "full": "VCA Release",
       "type": "int",
       "min": 0,
-      "max": 127,
-      "env": "r"
+      "max": 127
      },
      {
       "key": "flt_a",
@@ -430,8 +426,7 @@
       "full": "Flt Attack",
       "type": "int",
       "min": 0,
-      "max": 127,
-      "env": "a"
+      "max": 127
      },
      {
       "key": "flt_d",
@@ -439,8 +434,7 @@
       "full": "Flt Decay",
       "type": "int",
       "min": 0,
-      "max": 127,
-      "env": "d"
+      "max": 127
      },
      {
       "key": "flt_s",
@@ -448,8 +442,7 @@
       "full": "Flt Sustain",
       "type": "int",
       "min": 0,
-      "max": 127,
-      "env": "s"
+      "max": 127
      },
      {
       "key": "flt_r",
@@ -457,8 +450,7 @@
       "full": "Flt Release",
       "type": "int",
       "min": 0,
-      "max": 127,
-      "env": "r"
+      "max": 127
      }
     ]
    ]
