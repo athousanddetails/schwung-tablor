@@ -43,6 +43,11 @@ for b in banks:
             if s["type"] == "enum":
                 check(isinstance(s.get("options"), list) and s["options"],
                       f"{k}: enum needs options")
+            elif s["type"] == "file":
+                check(isinstance(s.get("fileRoot"), str) and s["fileRoot"].startswith("/"),
+                      f"{k}: file slot needs absolute fileRoot")
+                check(isinstance(s.get("fileFilter"), list) and s["fileFilter"],
+                      f"{k}: file slot needs fileFilter")
             else:
                 check("min" in s and "max" in s and s["min"] < s["max"],
                       f"{k}: needs min < max")
@@ -50,21 +55,16 @@ for b in banks:
             if "lfo" in s:    check(s["lfo"] in VALID_LFO, f"{k}: lfo hint {s['lfo']}")
             if "filter" in s: check(s["filter"] in VALID_FILTER, f"{k}: filter hint {s['filter']}")
 
-# ---- chain_params template: splice + parse ----------------------------
+# ---- chain_params: static JSON, parse + cross-check -------------------
 hdr = (ROOT / "src/dsp/params.h").read_text()
-m = re.search(r'tb_chain_params_fmt =\n    "(.*)";', hdr)
-check(m is not None, "chain fmt found in params.h")
+m = re.search(r'tb_chain_params_json =\n    "(.*)";', hdr)
+check(m is not None, "chain_params found in params.h")
 if m:
-    fmt = m.group(1).replace('\\"', '"').replace("\\\\", "\\")
-    # splice a realistic table list, exactly like the plugin does
-    opts = json.dumps(["Init", "Adventure Kid/AKWP 0001", 'Odd "quoted" name'])
-    filled = fmt
-    for sub in (opts, '"Init"', opts, '"Init"'):
-        filled = filled.replace("%s", sub, 1)
+    raw = m.group(1).replace('\\"', '"').replace("\\\\", "\\")
     try:
-        chain = json.loads(filled)
+        chain = json.loads(raw)
     except json.JSONDecodeError as e:
-        fails.append(f"spliced chain_params is not valid JSON: {e}")
+        fails.append(f"chain_params is not valid JSON: {e}")
         chain = []
     chain_keys = {p["key"] for p in chain}
 
@@ -74,14 +74,21 @@ if m:
     for k in chain_keys:
         check(k in seen_keys, f"chain_params key {k} not on any movy page")
 
-    # types agree
+    # types agree (movy 'file' pairs with schwung 'filepath')
     chain_types = {p["key"]: p["type"] for p in chain}
+    pair = {"file": "filepath", "int": "int", "float": "float", "enum": "enum"}
     for b in banks:
         for r in b["rows"]:
             for s in r:
                 if s and s["key"] in chain_types:
-                    check(s["type"] == chain_types[s["key"]],
+                    check(pair.get(s["type"]) == chain_types[s["key"]],
                           f"{s['key']}: movy type {s['type']} != chain {chain_types[s['key']]}")
+    # filepath entries carry the browser config
+    for p in chain:
+        if p["type"] == "filepath":
+            check(p.get("root", "").startswith("/") and p.get("filter") and
+                  p.get("live_preview") is True,
+                  f"{p['key']}: filepath needs root/filter/live_preview")
 
 # ---- ui_hierarchy: parses, root navigates everywhere, keys covered ----
 m2 = re.search(r'tb_ui_hierarchy_json =\n    "(.*)";', hdr)

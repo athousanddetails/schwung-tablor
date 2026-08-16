@@ -37,9 +37,14 @@ MOD_DST = ["None",
            "Filter Freq", "Filter Res", "Sub Level", "Noise Level", "Amp",
            "LFO1 Rate", "LFO2 Rate", "LFO3 Rate"]
 
-# The wavetable lists are DYNAMIC — scanned from disk at runtime. The generator
-# marks them with options=None; params.h emits a %s slot the plugin fills in.
-WT_DYNAMIC = None
+# Wavetable selection is a FILEPATH param: Schwung's Shadow UI opens its real
+# file browser (folders + live preview while the cursor moves), Movy opens its
+# own via type 'file'. No giant flat enum, no dynamic options machinery.
+WT_ROOT   = "/data/UserData/UserLibrary/Wavetables"
+WT_FILTER = [".wav", ".wt2048", ".wt1024", ".wt512", ".wt256"]
+
+def wtfile(key, short, full):
+    return dict(key=key, short=short, full=full, type="file", default="")
 
 # ---------------------------------------------------------------- helpers
 def pot(key, short, full, default=64):
@@ -62,8 +67,7 @@ def hint(p, **kw):
 # ---------------------------------------------------------------- the surface
 def osc(n):
     return dict(
-        table  = hint(enum(f"wt{n}_table", f"TBL{n}", f"WT{n} Table", WT_DYNAMIC),
-                      knobAcceleration="wide"),
+        table  = wtfile(f"wt{n}_table", f"TBL{n}", f"WT{n} Table"),
         pos    = pot(f"wt{n}_pos",     f"POS{n}",  f"WT{n} Pos", 0),
         level  = pot(f"wt{n}_level",   f"LVL{n}",  f"WT{n} Level", 100 if n == 1 else 0),
         tune   = num(f"wt{n}_tune",    f"TUN{n}",  f"WT{n} Tune", -24, 24, 0),
@@ -146,8 +150,6 @@ GLOBAL = dict(
     legato = enum("legato", "LEGA", "Legato", ONOFF, 0),
     pb     = num("pb_range", "BEND", "PB Range", 0, 24, 2),
     vol    = pot("volume", "VOL", "Volume", 100),
-    rescan = enum("wt_rescan", "SCAN", "Rescan Tables", ONOFF, 0, behavior="trigger",
-                  automatable=False),
 )
 
 # ---------------------------------------------------------------- pages
@@ -189,7 +191,7 @@ BANKS = [
     ]),
     ("Global", True, [
         row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"], GLOBAL["gmode"],
-            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"], GLOBAL["rescan"]),
+            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
     ]),
 ]
 
@@ -210,10 +212,11 @@ def movy_slot(p):
     if p is None:
         return None
     s = {"key": p["key"], "short": p["short"], "full": p["full"], "type": p["type"]}
-    if p["type"] == "enum":
-        # Dynamic (wavetable) lists: movy re-reads options from chain_params,
-        # so the config carries a placeholder single option.
-        s["options"] = p["options"] if p["options"] is not None else ["Init"]
+    if p["type"] == "file":
+        s["fileRoot"] = WT_ROOT
+        s["fileFilter"] = WT_FILTER
+    elif p["type"] == "enum":
+        s["options"] = p["options"]
     else:
         s["min"], s["max"] = p["min"], p["max"]
     if p.get("automatable") is False:
@@ -236,22 +239,21 @@ movy_config = {
 
 # ---------------------------------------------------------------- emit: chain_params
 def chain_param(p):
+    if p["type"] == "file":
+        return {"key": p["key"], "name": p["full"], "type": "filepath",
+                "root": WT_ROOT, "start_path": WT_ROOT,
+                "filter": WT_FILTER, "live_preview": True, "default": ""}
     d = {"key": p["key"], "name": p["full"], "type": p["type"]}
     if p["type"] == "enum":
-        if p["options"] is None:
-            d["options"] = "%DYNAMIC%"          # spliced by the plugin at runtime
-        else:
-            d["options"] = p["options"]
-        d["default"] = (p["options"] or ["Init"])[p["default"]] if p["options"] else "%DYNDEF%"
+        d["options"] = p["options"]
+        d["default"] = p["options"][p["default"]]
     else:
         d["min"], d["max"], d["default"] = p["min"], p["max"], p["default"]
     return d
 
 chain = [chain_param(p) for p in PARAMS]
 chain_json = json.dumps(chain, separators=(",", ":"))
-# Split into a printf template around the dynamic wavetable option lists.
-chain_json = chain_json.replace('"%DYNAMIC%"', "%s").replace('"%DYNDEF%"', "%s")
-assert chain_json.count("%s") == 4, "expected wt1/wt2 options+default slots"
+assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"
 
 # ---------------------------------------------------------------- emit: ui_hierarchy
 # The Shadow UI's enterComponentEdit uses the hierarchy editor only when the
@@ -276,13 +278,18 @@ LEVEL_MAP = [  # (bank name, row index) -> (level id, label)
 ]
 
 def hier_param(p):
-    """Editable param entry. Dynamic enums carry only {key,name}; their
-    options/type come from chain_params at runtime."""
+    """Editable param entry with FULL metadata — the Shadow UI edits straight
+    from the hierarchy, so nothing may rely on a chain_params merge."""
     d = {"key": p["key"], "name": p["full"]}
-    if p["type"] == "enum":
-        if p["options"] is not None:
-            d["type"] = "enum"
-            d["options"] = p["options"]
+    if p["type"] == "file":
+        d["type"] = "filepath"
+        d["root"] = WT_ROOT
+        d["start_path"] = WT_ROOT
+        d["filter"] = WT_FILTER
+        d["live_preview"] = True
+    elif p["type"] == "enum":
+        d["type"] = "enum"
+        d["options"] = p["options"]
     else:
         d["type"] = "int"
         d["min"], d["max"] = p["min"], p["max"]
@@ -348,15 +355,19 @@ lines = [
     f'#define TB_VERSION "{VERSION}"',
     f"#define TB_PARAM_COUNT {len(PARAMS)}",
     "",
-    "typedef enum { TB_INT = 0, TB_ENUM = 1 } tb_param_type_t;",
+    "typedef enum { TB_INT = 0, TB_ENUM = 1, TB_PATH = 2 } tb_param_type_t;",
     "",
     "typedef struct {",
     "    const char *key;",
     "    tb_param_type_t type;",
     "    float min, max, def;              /* enums: def is the option index */",
-    "    int n_options;                    /* 0 for non-enums; -1 = dynamic  */",
-    "    const char *const *options;       /* NULL for non-enums / dynamic   */",
+    "    int n_options;                    /* 0 for non-enums                */",
+    "    const char *const *options;       /* NULL for non-enums             */",
     "} tb_param_t;",
+    "",
+    "/* TB_PATH params (wavetable files) store a string, not a float — the",
+    " * plugin keeps them in a side table indexed by tb_path_slot(). */",
+    "#define TB_PATH_COUNT 2",
     "",
 ]
 enum_names = []
@@ -378,21 +389,20 @@ lines += opt_tables + [""]
 
 rows = []
 for p in PARAMS:
-    if p["type"] == "enum":
-        if p["options"] is None:
-            rows.append(f'    {{ "{p["key"]}", TB_ENUM, 0, 0, {p["default"]}, -1, 0 }},')
-        else:
-            tbl = opt_index[tuple(p["options"])]
-            rows.append(f'    {{ "{p["key"]}", TB_ENUM, 0, {len(p["options"]) - 1}, '
-                        f'{p["default"]}, {len(p["options"])}, {tbl} }},')
+    if p["type"] == "file":
+        rows.append(f'    {{ "{p["key"]}", TB_PATH, 0, 0, 0, 0, 0 }},')
+    elif p["type"] == "enum":
+        tbl = opt_index[tuple(p["options"])]
+        rows.append(f'    {{ "{p["key"]}", TB_ENUM, 0, {len(p["options"]) - 1}, '
+                    f'{p["default"]}, {len(p["options"])}, {tbl} }},')
     else:
         rows.append(f'    {{ "{p["key"]}", TB_INT, {p["min"]}, {p["max"]}, {p["default"]}, 0, 0 }},')
 lines += ["static const tb_param_t tb_params[TB_PARAM_COUNT] = {"] + rows + ["};", ""]
 
 lines += [
-    "/* chain_params JSON template. Four %s slots: wt1 options, wt1 default,",
-    " * wt2 options, wt2 default — filled by the wavetable scanner. */",
-    f'static const char *tb_chain_params_fmt =\n    "{c_escape(chain_json)}";',
+    "/* chain_params JSON — fully static, served verbatim (wavetable selection",
+    " * is a filepath param; the file browser lists the folder live). */",
+    f'static const char *tb_chain_params_json =\n    "{c_escape(chain_json)}";',
     "",
     "/* ui_hierarchy for the Shadow UI (and Movy's generic path): one level",
     " * per page, root = the headline page + navigation. Static — dynamic",

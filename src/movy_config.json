@@ -10,21 +10,29 @@
       "key": "wt1_table",
       "short": "TBL1",
       "full": "WT1 Table",
-      "type": "enum",
-      "options": [
-       "Init"
-      ],
-      "knobAcceleration": "wide"
+      "type": "file",
+      "fileRoot": "/data/UserData/UserLibrary/Wavetables",
+      "fileFilter": [
+       ".wav",
+       ".wt2048",
+       ".wt1024",
+       ".wt512",
+       ".wt256"
+      ]
      },
      {
       "key": "wt2_table",
       "short": "TBL2",
       "full": "WT2 Table",
-      "type": "enum",
-      "options": [
-       "Init"
-      ],
-      "knobAcceleration": "wide"
+      "type": "file",
+      "fileRoot": "/data/UserData/UserLibrary/Wavetables",
+      "fileFilter": [
+       ".wav",
+       ".wt2048",
+       ".wt1024",
+       ".wt512",
+       ".wt256"
+      ]
      },
      {
       "key": "wt1_pos",
@@ -1440,18 +1448,7 @@
       "min": 0,
       "max": 127
      },
-     {
-      "key": "wt_rescan",
-      "short": "SCAN",
-      "full": "Rescan Tables",
-      "type": "enum",
-      "options": [
-       "Off",
-       "On"
-      ],
-      "automatable": false,
-      "behavior": "trigger"
-     }
+     null
     ]
    ]
   }

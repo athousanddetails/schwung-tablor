@@ -28,14 +28,12 @@ static const host_api_v1_t *g_host = nullptr;
 
 struct tablor_instance {
     tb::Engine engine;
-    tb::WtScanner scanner;
+    tb::WtScanner scanner;                  /* used for first-run seeding only */
     tb::WtLoader loader { engine };
     char  module_dir[512] = {};
 
-    /* chain_params JSON is assembled once per request into this buffer;
-     * options lists (the scanned table names) build in opts_buf. */
-    char  chain_buf[96 * 1024];
-    char  opts_buf[64 * 1024];
+    /* wavetable selection = absolute file paths ("" = built-in Init) */
+    char  wt_path[TB_PATH_COUNT][512] = {};
 
     /* state blob scratch */
     char  state_buf[8 * 1024];
@@ -51,34 +49,32 @@ static int param_index(const char *key)
     return -1;
 }
 
-/* Dynamic enum options (the wavetable list) come from the scanner. */
-static int dyn_option_count(const tablor_instance *inst, int /*param*/)
+/* Which path slot a TB_PATH param uses: wt1_table -> 0, wt2_table -> 1. */
+static int tb_path_slot(int param_idx)
 {
-    return (int) inst->scanner.list().size();
-}
-static const char *dyn_option_name(const tablor_instance *inst, int /*param*/, int idx)
-{
-    const auto &l = inst->scanner.list();
-    if (idx < 0 || idx >= (int) l.size()) return nullptr;
-    return l[(size_t) idx].name.c_str();
+    return param_idx == TB_P_WT1_TABLE ? 0 : 1;
 }
 
-/* Post a background load for the table the pot now points at. */
-static void request_table(tablor_instance *inst, int osc)
+/* Store a path and post the background load. "" or "Init" = built-in. */
+static void set_table_path(tablor_instance *inst, int osc, const char *path)
 {
-    int idx = (int) inst->params()[osc == 0 ? TB_P_WT1_TABLE : TB_P_WT2_TABLE];
-    const auto &l = inst->scanner.list();
-    if (idx >= 0 && idx < (int) l.size())
-        inst->loader.requestLoad(osc, l[(size_t) idx]);
+    if (!strcmp(path, "Init")) path = "";
+    snprintf(inst->wt_path[osc], sizeof inst->wt_path[osc], "%s", path);
+
+    tb::WtEntry e;
+    e.path = path;
+    if (const char *dot = strrchr(path, '.'); dot && !strncasecmp(dot, ".wt", 3)) {
+        int fs = atoi(dot + 3);
+        if (fs >= 256 && fs <= 4096 && (fs & (fs - 1)) == 0)
+            e.flacFrameSize = fs;
+    }
+    inst->loader.requestLoad(osc, e);
 }
 
-static float clamp_param(const tb_param_t *p, float v, const tablor_instance *inst, int idx)
+static float clamp_param(const tb_param_t *p, float v)
 {
-    float lo = p->min, hi = p->max;
-    if (p->n_options == -1)                    /* dynamic enum: live count */
-        hi = (float) (dyn_option_count(inst, idx) - 1);
-    if (v < lo) v = lo;
-    if (v > hi) v = hi;
+    if (v < p->min) v = p->min;
+    if (v > p->max) v = p->max;
     return v;
 }
 
@@ -103,7 +99,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
          * half-apply it (the ER-99 total-silence lesson). */
         if (strncmp(val, "TBLR1;", 6) != 0) return;
         const char *p = val + 6;
-        char kbuf[64], vbuf[128];
+        char kbuf[64], vbuf[512];
         while (*p) {
             const char *eq = strchr(p, '=');
             if (!eq) break;
@@ -113,23 +109,18 @@ static void tb_set_param(void *instance, const char *key, const char *val)
             if (kl < sizeof kbuf && vl < sizeof vbuf) {
                 memcpy(kbuf, p, kl); kbuf[kl] = 0;
                 memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
-                if (!strcmp(kbuf, "wt1_table_name") || !strcmp(kbuf, "wt2_table_name")) {
-                    int osc = kbuf[2] == '1' ? 0 : 1;
-                    int ti = inst->scanner.indexOfName(vbuf);
-                    inst->params()[osc == 0 ? TB_P_WT1_TABLE : TB_P_WT2_TABLE] =
-                        (float) (ti >= 0 ? ti : 0);
-                } else {
-                    int idx = param_index(kbuf);
-                    if (idx >= 0)
+                int idx = param_index(kbuf);
+                if (idx >= 0) {
+                    if (tb_params[idx].type == TB_PATH)
+                        set_table_path(inst, tb_path_slot(idx), vbuf);
+                    else
                         inst->params()[idx] = clamp_param(&tb_params[idx],
-                                                        strtof(vbuf, nullptr), inst, idx);
+                                                          strtof(vbuf, nullptr));
                 }
             }
             p = (*semi) ? semi + 1 : semi;
         }
         inst->engine.syncModSlots();
-        request_table(inst, 0);
-        request_table(inst, 1);
         return;
     }
 
@@ -137,21 +128,18 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     if (idx < 0) return;
     const tb_param_t *p = &tb_params[idx];
 
+    if (p->type == TB_PATH) {
+        set_table_path(inst, tb_path_slot(idx), val);
+        return;
+    }
+
     float v;
     if (p->type == TB_ENUM) {
         /* Accept an option NAME or an integer index — never trust one
          * spelling (the Forge atoi-collapse gotcha). */
         v = -1;
-        if (p->n_options > 0) {
-            for (int i = 0; i < p->n_options; i++)
-                if (!strcmp(p->options[i], val)) { v = (float) i; break; }
-        } else {                                /* dynamic enum */
-            int n = dyn_option_count(inst, idx);
-            for (int i = 0; i < n; i++) {
-                const char *name = dyn_option_name(inst, idx, i);
-                if (name && !strcmp(name, val)) { v = (float) i; break; }
-            }
-        }
+        for (int i = 0; i < p->n_options; i++)
+            if (!strcmp(p->options[i], val)) { v = (float) i; break; }
         if (v < 0) {                            /* not a name — try a number */
             char *end = nullptr;
             float n = strtof(val, &end);
@@ -162,36 +150,11 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         v = strtof(val, nullptr);
     }
 
-    inst->params()[idx] = clamp_param(p, v, inst, idx);
+    inst->params()[idx] = clamp_param(p, v);
 
     /* keep the engine's mod-slot cache in step (cheap: 32 reads) */
     if (k[0] == 'm' && k[1] >= '1' && k[1] <= '8')
         inst->engine.syncModSlots();
-
-    /* wavetable selection -> background load + swap */
-    if (idx == TB_P_WT1_TABLE) request_table(inst, 0);
-    if (idx == TB_P_WT2_TABLE) request_table(inst, 1);
-
-    /* rescan trigger: re-list the folders, keep current selections by name */
-    if (idx == TB_P_WT_RESCAN && inst->params()[idx] > 0.5f) {
-        char n1[256] = {}, n2[256] = {};
-        const char *c1 = dyn_option_name(inst, TB_P_WT1_TABLE,
-                                         (int) inst->params()[TB_P_WT1_TABLE]);
-        const char *c2 = dyn_option_name(inst, TB_P_WT2_TABLE,
-                                         (int) inst->params()[TB_P_WT2_TABLE]);
-        if (c1) snprintf(n1, sizeof n1, "%s", c1);
-        if (c2) snprintf(n2, sizeof n2, "%s", c2);
-
-        inst->scanner.scan();
-
-        int i1 = inst->scanner.indexOfName(n1);
-        int i2 = inst->scanner.indexOfName(n2);
-        inst->params()[TB_P_WT1_TABLE] = (float) (i1 >= 0 ? i1 : 0);
-        inst->params()[TB_P_WT2_TABLE] = (float) (i2 >= 0 ? i2 : 0);
-        inst->params()[TB_P_WT_RESCAN] = 0.0f;      /* trigger re-arms */
-        request_table(inst, 0);
-        request_table(inst, 1);
-    }
 }
 
 static int write_str(char *buf, int buf_len, const char *s)
@@ -208,38 +171,8 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     auto *inst = (tablor_instance *) instance;
     if (!inst || !key || !buf || buf_len <= 1) return -1;
 
-    if (!strcmp(key, "chain_params")) {
-        /* Assemble the scanned table names as a JSON string array. */
-        char *opts = inst->opts_buf;
-        const size_t optsCap = sizeof inst->opts_buf;
-        int  n = dyn_option_count(inst, TB_P_WT1_TABLE);
-        size_t o = 0;
-        opts[o++] = '[';
-        for (int i = 0; i < n && o < optsCap - 8; i++) {
-            if (i) opts[o++] = ',';
-            opts[o++] = '"';
-            for (const char *s = dyn_option_name(inst, TB_P_WT1_TABLE, i);
-                 s && *s && o < optsCap - 8; s++) {
-                if (*s == '"' || *s == '\\') opts[o++] = '\\';
-                opts[o++] = *s;
-            }
-            opts[o++] = '"';
-        }
-        opts[o++] = ']'; opts[o] = 0;
-
-        char def1[264], def2[264];
-        snprintf(def1, sizeof def1, "\"%s\"",
-                 dyn_option_name(inst, TB_P_WT1_TABLE,
-                                 (int) inst->params()[TB_P_WT1_TABLE]));
-        snprintf(def2, sizeof def2, "\"%s\"",
-                 dyn_option_name(inst, TB_P_WT2_TABLE,
-                                 (int) inst->params()[TB_P_WT2_TABLE]));
-
-        int len = snprintf(inst->chain_buf, sizeof inst->chain_buf,
-                           tb_chain_params_fmt, opts, def1, opts, def2);
-        if (len < 0 || len >= (int) sizeof inst->chain_buf) return -1;
-        return write_str(buf, buf_len, inst->chain_buf);
-    }
+    if (!strcmp(key, "chain_params"))
+        return write_str(buf, buf_len, tb_chain_params_json);
 
     if (!strcmp(key, "ui_hierarchy"))
         return write_str(buf, buf_len, tb_ui_hierarchy_json);
@@ -247,22 +180,20 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "state")) {
         int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
         for (int i = 0; i < TB_PARAM_COUNT; i++) {
-            if (tb_params[i].n_options == -1) continue; /* tables: by name below */
+            if (tb_params[i].type == TB_PATH) {
+                const char *path = inst->wt_path[tb_path_slot(i)];
+                if (path[0])
+                    o += snprintf(inst->state_buf + o,
+                                  sizeof inst->state_buf - (size_t) o,
+                                  "%s=%s;", tb_params[i].key, path);
+                continue;
+            }
             float v = inst->params()[i];
             if (v == tb_params[i].def) continue;        /* defaults are implicit */
             o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o,
                           "%s=%g;", tb_params[i].key, (double) v);
             if (o >= (int) sizeof inst->state_buf - 64) break;
         }
-        /* wavetable selections are stored BY NAME — indexes shift when the
-         * user adds files, names don't. */
-        const char *n1 = dyn_option_name(inst, TB_P_WT1_TABLE,
-                                         (int) inst->params()[TB_P_WT1_TABLE]);
-        const char *n2 = dyn_option_name(inst, TB_P_WT2_TABLE,
-                                         (int) inst->params()[TB_P_WT2_TABLE]);
-        o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o,
-                      "wt1_table_name=%s;wt2_table_name=%s;",
-                      n1 ? n1 : "Init", n2 ? n2 : "Init");
         return write_str(buf, buf_len, inst->state_buf);
     }
 
@@ -270,10 +201,11 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (idx < 0) return -1;
     const tb_param_t *p = &tb_params[idx];
 
+    if (p->type == TB_PATH)
+        return write_str(buf, buf_len, inst->wt_path[tb_path_slot(idx)]);
+
     if (p->type == TB_ENUM) {
-        const char *name = (p->n_options > 0)
-            ? p->options[(int) inst->params()[idx]]
-            : dyn_option_name(inst, idx, (int) inst->params()[idx]);
+        const char *name = p->options[(int) inst->params()[idx]];
         return write_str(buf, buf_len, name ? name : "?");
     }
     char tmp[32];

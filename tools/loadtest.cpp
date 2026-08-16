@@ -88,9 +88,9 @@ int main(int argc, char **argv)
     api->get_param(inst, "flt_type", buf, sizeof buf);
     CHECK(!strcmp(buf, "BP 12"), "unknown enum name ignored -> \"%s\"", buf);
 
-    /* ---- dynamic enum placeholder ---- */
-    api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Init"), "wt1_table placeholder -> \"%s\"", buf);
+    /* ---- wavetable filepath default: empty = built-in Init ---- */
+    n = api->get_param(inst, "wt1_table", buf, sizeof buf);
+    CHECK(n == 0 && buf[0] == 0, "wt1_table default empty (built-in Init)");
 
     /* ---- state round-trip ---- */
     api->set_param(inst, "vca_r", "77");
@@ -199,23 +199,27 @@ int main(int argc, char **argv)
           "ui_hierarchy served (%d bytes)", n);
     CHECK(strstr(big, "\"lfo3\"") && strstr(big, "\"global\"") &&
           strstr(big, "\"mod78\""), "hierarchy has all section levels");
+    CHECK(strstr(big, "\"filepath\"") && strstr(big, "\"live_preview\":true"),
+          "hierarchy exposes the wavetable file browser");
 
-    /* ---- phase 4: wavetable list + mid-note switching ----
-     * Factory packs are seeded into the USER folder on first run. */
+    /* ---- filepath selection + mid-note switching ---- */
     n = api->get_param(inst, "chain_params", big, sizeof big);
-    CHECK(n > 1000 && strstr(big, "Adventure Kid/") && strstr(big, "Neu KatalYst/"),
-          "chain_params lists factory packs from user folder (%d bytes)", n);
+    CHECK(n > 1000 && strstr(big, "\"filepath\"") &&
+          strstr(big, "/data/UserData/UserLibrary/Wavetables"),
+          "chain_params exposes filepath browser (%d bytes)", n);
 
-    api->set_param(inst, "wt1_table", "Adventure Kid/AKWP 0001");
+    #define WTDIR "/data/UserData/UserLibrary/Wavetables/"
+    api->set_param(inst, "wt1_table", WTDIR "Adventure Kid/AKWP 0001.wt2048");
     api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Adventure Kid/AKWP 0001"),
-          "wt1 select by name -> \"%s\"", buf);
+    CHECK(strstr(buf, "AKWP 0001.wt2048") != nullptr,
+          "wt1 select by path -> \"%s\"", buf);
 
     api->on_midi(inst, note_on, 3, 0);
     struct timespec ts = { 0, 50 * 1000000 };
     long swPeak = 0, swMin = 1 << 30;
-    const char *cycle[4] = { "Neu KatalYst/NK - ACTIVE", "Init",
-                             "Adventure Kid/AKWP 0042", "Neu KatalYst/NK - AGE" };
+    const char *cycle[4] = { WTDIR "Neu KatalYst/NK - ACTIVE.wt2048", "",
+                             WTDIR "Adventure Kid/AKWP 0042.wt2048",
+                             WTDIR "Neu KatalYst/NK - AGE.wt2048" };
     for (int s = 0; s < 4; s++) {                       /* switch WHILE held */
         api->set_param(inst, "wt1_table", cycle[s]);
         for (int b = 0; b < 60; b++) {                  /* ~175 ms per table */
@@ -234,20 +238,20 @@ int main(int argc, char **argv)
           "sound continuous across 4 mid-note table switches (peak %ld, min %ld)",
           swPeak, swMin);
     api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Neu KatalYst/NK - AGE"), "landed on \"%s\"", buf);
+    CHECK(strstr(buf, "NK - AGE.wt2048") != nullptr, "landed on \"%s\"", buf);
 
-    /* state stores the table by NAME and restores it */
+    /* state stores the table PATH and restores it */
     n = api->get_param(inst, "state", big, sizeof big);
-    CHECK(strstr(big, "wt1_table_name=Neu KatalYst/NK - AGE;") != nullptr,
-          "state carries table name");
+    CHECK(strstr(big, "wt1_table=" WTDIR "Neu KatalYst/NK - AGE.wt2048;") != nullptr,
+          "state carries table path");
     memcpy(saved, big, sizeof big);
-    api->set_param(inst, "wt1_table", "Init");
+    api->set_param(inst, "wt1_table", "");
     api->set_param(inst, "synth:state", saved);
     api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Neu KatalYst/NK - AGE"), "state restores table by name");
+    CHECK(strstr(buf, "NK - AGE.wt2048") != nullptr, "state restores table path");
 
     api->on_midi(inst, all_off, 3, 0);
-    api->set_param(inst, "wt1_table", "Init");
+    api->set_param(inst, "wt1_table", "");
 
     api->destroy_instance(inst);
     dlclose(dl);
