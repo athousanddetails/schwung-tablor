@@ -62,7 +62,10 @@ int main(int argc, char **argv)
     CHECK(n > 100, "chain_params returns %d bytes", n);
     CHECK(big[0] == '[' && big[n - 1] == ']', "chain_params looks like a JSON array");
     CHECK(strstr(big, "\"wt1_table\"") && strstr(big, "\"volume\"") &&
-          strstr(big, "\"m8_on\""), "chain_params contains first/mid/last keys");
+          strstr(big, "\"u8_target\""), "chain_params contains first/mid/last keys");
+    CHECK(!strstr(big, "\"m8_on\"") && !strstr(big, "\"lfo3_shape\"") &&
+          !strstr(big, "\"rt_wt1\"") && !strstr(big, "\"wt1_fine\""),
+          "trimmed params are really gone");
     CHECK(strstr(big, "%s") == nullptr, "no unfilled %%s slots leaked");
 
     /* ---- int param round-trip ---- */
