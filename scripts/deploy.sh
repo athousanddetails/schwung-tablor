@@ -20,11 +20,15 @@ DEST="/data/UserData/schwung/modules/sound_generators/tablor"
 echo "==> $HOST:$DEST"
 ssh "$HOST" "mkdir -p $DEST/wavetables"
 
+ssh "$HOST" "mkdir -p $DEST/presets"
 scp -q "$SRC/build/dsp.so"          "$HOST:$DEST/dsp.so.new"
 scp -q "$SRC/src/module.json"       "$HOST:$DEST/module.json.new"
 scp -q "$SRC/src/movy_config.json"  "$HOST:$DEST/movy_config.json.new"
 scp -q "$SRC/src/ui_chain.js"       "$HOST:$DEST/ui_chain.js.new"
 scp -q "$SRC/src/ui_pages.json"     "$HOST:$DEST/ui_pages.json.new"
+scp -q "$SRC/src/help.json"         "$HOST:$DEST/help.json"
+scp -q "$SRC/src/web_ui.html"       "$HOST:$DEST/web_ui.html"
+scp -q "$SRC/src/presets/factory.tbl" "$HOST:$DEST/presets/factory.tbl"
 
 # Atomic swap. Do NOT replace this with a direct scp.
 ssh "$HOST" "cd $DEST && \

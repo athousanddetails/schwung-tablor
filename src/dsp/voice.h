@@ -157,7 +157,13 @@ public:
 
         /* Re-point at the context's tables every block: the loader may have
          * swapped them since noteStarted, and the block's shared_ptr is the
-         * only thing keeping a table alive. A held raw pointer would dangle. */
+         * only thing keeping a table alive. A held raw pointer would dangle.
+         * A swap mid-note lands as a waveform step at this block's first
+         * sample — fade the block in from silence (2.9 ms) to mask it. */
+        bool swapped = (lastTable1 && c.table1 != lastTable1) ||
+                       (lastTable2 && c.table2 != lastTable2);
+        lastTable1 = c.table1;
+        lastTable2 = c.table2;
         osc1.setWavetable(c.table1);
         osc2.setWavetable(c.table2);
 
@@ -206,6 +212,14 @@ public:
         }
 
         adsr.processMultiplying(postL, postR, n);
+
+        if (swapped) {
+            for (int i = 0; i < n; i++) {
+                float g = (float) i / (float) n;
+                postL[i] *= g;
+                postR[i] *= g;
+            }
+        }
 
         if (adsr.getState() == AnalogADSR::State::idle)
             active = false;
@@ -385,6 +399,7 @@ private:
     LFO lfos[kLfos];
     ValueSmoother<float> noteSmoother;
     ModOffsets modOff;
+    const Wavetable *lastTable1 = nullptr, *lastTable2 = nullptr;
 
     double sampleRate = 44100.0;
     float oscNote[2] = { 60.0f, 60.0f }, oscGain[2] = {};

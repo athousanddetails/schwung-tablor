@@ -24,12 +24,15 @@ cmake --build build --target "$TARGET" -j"$(nproc)"
 
 # ---- Package for the Module Store ----
 rm -rf dist/tablor
-mkdir -p dist/tablor/wavetables
+mkdir -p dist/tablor/wavetables dist/tablor/presets
 cp build/dsp.so           dist/tablor/
 cp src/module.json        dist/tablor/
 cp src/movy_config.json   dist/tablor/
 cp src/ui_chain.js        dist/tablor/
 cp src/ui_pages.json      dist/tablor/
+cp src/help.json          dist/tablor/
+cp src/web_ui.html        dist/tablor/
+cp src/presets/factory.tbl dist/tablor/presets/
 cp -r src/wavetables/. dist/tablor/wavetables/ 2>/dev/null || true
 (cd dist && tar -czf tablor-module.tar.gz tablor/)
 echo "Tarball: dist/tablor-module.tar.gz"

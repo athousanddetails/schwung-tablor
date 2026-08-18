@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstdint>
 #include <new>
+#include <string>
+#include <vector>
 
 #include "../host/plugin_api_v1.h"
 #include "params.h"
@@ -35,11 +37,35 @@ struct tablor_instance {
     /* wavetable selection = absolute file paths ("" = built-in Init) */
     char  wt_path[TB_PATH_COUNT][512] = {};
 
+    /* factory presets (presets/factory.tbl): name + state blob each */
+    struct preset { std::string name, blob; };
+    std::vector<preset> presets;
+    int preset_index = 0;
+
     /* state blob scratch */
     char  state_buf[8 * 1024];
 
     float *params() { return engine.pots; }
 };
+
+static void load_presets(tablor_instance *inst)
+{
+    char path[600];
+    snprintf(path, sizeof path, "%s/presets/factory.tbl", inst->module_dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char line[4096];
+    while (fgets(line, sizeof line, f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        char *bar = strchr(line, '|');
+        if (!bar) continue;
+        *bar = 0;
+        char *blob = bar + 1;
+        blob[strcspn(blob, "\r\n")] = 0;
+        inst->presets.push_back({ line, blob });
+    }
+    fclose(f);
+}
 
 static int param_index(const char *key)
 {
@@ -76,6 +102,47 @@ static float clamp_param(const tb_param_t *p, float v)
     if (v < p->min) v = p->min;
     if (v > p->max) v = p->max;
     return v;
+}
+
+static void reset_to_defaults(tablor_instance *inst)
+{
+    for (int i = 0; i < TB_PARAM_COUNT; i++)
+        if (tb_params[i].type != TB_PATH)
+            inst->params()[i] = tb_params[i].def;
+    set_table_path(inst, 0, "");
+    set_table_path(inst, 1, "");
+    inst->engine.syncModSlots();
+}
+
+/* Version-tagged blob: "TBLR1;key=val;key=val;…". Anything without the
+ * tag is from another life — ignore it entirely rather than half-apply
+ * it (the ER-99 total-silence lesson). */
+static void apply_state_blob(tablor_instance *inst, const char *val)
+{
+    if (strncmp(val, "TBLR1;", 6) != 0) return;
+    const char *p = val + 6;
+    char kbuf[64], vbuf[512];
+    while (*p) {
+        const char *eq = strchr(p, '=');
+        if (!eq) break;
+        const char *semi = strchr(eq, ';');
+        if (!semi) semi = eq + strlen(eq);
+        size_t kl = (size_t) (eq - p), vl = (size_t) (semi - eq - 1);
+        if (kl < sizeof kbuf && vl < sizeof vbuf) {
+            memcpy(kbuf, p, kl); kbuf[kl] = 0;
+            memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
+            int idx = param_index(kbuf);
+            if (idx >= 0) {
+                if (tb_params[idx].type == TB_PATH)
+                    set_table_path(inst, tb_path_slot(idx), vbuf);
+                else
+                    inst->params()[idx] = clamp_param(&tb_params[idx],
+                                                      strtof(vbuf, nullptr));
+            }
+        }
+        p = (*semi) ? semi + 1 : semi;
+    }
+    inst->engine.syncModSlots();
 }
 
 /* ------------------------------------------------------------------ */
@@ -129,33 +196,18 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     if (colon) k = colon + 1;
 
     if (!strcmp(k, "state")) {
-        /* Version-tagged blob: "TBLR1;key=val;key=val;…". Anything without
-         * the tag is from another life — ignore it entirely rather than
-         * half-apply it (the ER-99 total-silence lesson). */
-        if (strncmp(val, "TBLR1;", 6) != 0) return;
-        const char *p = val + 6;
-        char kbuf[64], vbuf[512];
-        while (*p) {
-            const char *eq = strchr(p, '=');
-            if (!eq) break;
-            const char *semi = strchr(eq, ';');
-            if (!semi) semi = eq + strlen(eq);
-            size_t kl = (size_t) (eq - p), vl = (size_t) (semi - eq - 1);
-            if (kl < sizeof kbuf && vl < sizeof vbuf) {
-                memcpy(kbuf, p, kl); kbuf[kl] = 0;
-                memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
-                int idx = param_index(kbuf);
-                if (idx >= 0) {
-                    if (tb_params[idx].type == TB_PATH)
-                        set_table_path(inst, tb_path_slot(idx), vbuf);
-                    else
-                        inst->params()[idx] = clamp_param(&tb_params[idx],
-                                                          strtof(vbuf, nullptr));
-                }
-            }
-            p = (*semi) ? semi + 1 : semi;
-        }
-        inst->engine.syncModSlots();
+        apply_state_blob(inst, val);
+        return;
+    }
+
+    if (!strcmp(k, "preset")) {
+        int pi = atoi(val);
+        if (pi < 0 || pi >= (int) inst->presets.size()) return;
+        inst->preset_index = pi;
+        /* a preset is a full sound: reset to defaults first so nothing
+         * from the previous sound leaks through */
+        reset_to_defaults(inst);
+        apply_state_blob(inst, inst->presets[(size_t) pi].blob.c_str());
         return;
     }
 
@@ -236,6 +288,26 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         return o;
     }
 
+    /* Shadow UI preset browser convention: preset_count / preset /
+     * preset_name (the "No presets" screen reads exactly these). */
+    if (!strcmp(key, "preset_count")) {
+        char tmp[16];
+        snprintf(tmp, sizeof tmp, "%d", (int) inst->presets.size());
+        return write_str(buf, buf_len, tmp);
+    }
+    if (!strcmp(key, "preset")) {
+        char tmp[16];
+        snprintf(tmp, sizeof tmp, "%d", inst->preset_index);
+        return write_str(buf, buf_len, tmp);
+    }
+    if (!strcmp(key, "preset_name")) {
+        if (inst->preset_index < 0 ||
+            inst->preset_index >= (int) inst->presets.size())
+            return write_str(buf, buf_len, "");
+        return write_str(buf, buf_len,
+                         inst->presets[(size_t) inst->preset_index].name.c_str());
+    }
+
     if (!strcmp(key, "state")) {
         int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
         for (int i = 0; i < TB_PARAM_COUNT; i++) {
@@ -312,6 +384,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
 
     tb::WtScanner::seedUserFolder(inst->module_dir);
     inst->scanner.scan();
+    load_presets(inst);
 
     if (g_host && g_host->log) {
         char msg[128];

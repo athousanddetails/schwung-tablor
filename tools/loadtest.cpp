@@ -257,6 +257,40 @@ int main(int argc, char **argv)
     api->on_midi(inst, all_off, 3, 0);
     api->set_param(inst, "wt1_table", "");
 
+    /* ---- factory presets: count/name served, applying CHANGES params,
+     * and switching presets resets what the previous one touched ---- */
+    n = api->get_param(inst, "preset_count", buf, sizeof buf);
+    CHECK(n > 0 && atoi(buf) == 8, "preset_count = 8 (got \"%s\")", buf);
+
+    api->set_param(inst, "preset", "2");                /* Neu Bass: mono */
+    api->get_param(inst, "preset_name", buf, sizeof buf);
+    CHECK(!strcmp(buf, "Neu Bass"), "preset 2 name -> \"%s\"", buf);
+    api->get_param(inst, "voice_mode", buf, sizeof buf);
+    CHECK(!strcmp(buf, "Mono"), "Neu Bass sets mono (\"%s\")", buf);
+    api->get_param(inst, "wt1_table", buf, sizeof buf);
+    CHECK(strstr(buf, "NK - ACTIVE") != nullptr, "Neu Bass loads its table");
+
+    api->set_param(inst, "preset", "0");                /* Init resets */
+    api->get_param(inst, "voice_mode", buf, sizeof buf);
+    CHECK(!strcmp(buf, "Poly"), "Init preset resets to poly (\"%s\")", buf);
+    api->get_param(inst, "wt1_table", buf, sizeof buf);
+    CHECK(buf[0] == 0, "Init preset resets table to built-in");
+
+    /* preset audibly plays */
+    api->set_param(inst, "preset", "6");                /* Glass Bells */
+    api->on_midi(inst, note_on, 3, 0);
+    long pPeak = 0;
+    for (int b = 0; b < 150; b++) {
+        api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
+            long v = out[i] < 0 ? -out[i] : out[i];
+            if (v > pPeak) pPeak = v;
+        }
+    }
+    CHECK(pPeak > 1000, "Glass Bells makes sound (peak %ld)", pPeak);
+    api->on_midi(inst, all_off, 3, 0);
+    api->set_param(inst, "preset", "0");
+
     api->destroy_instance(inst);
     dlclose(dl);
 
