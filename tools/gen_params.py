@@ -137,7 +137,15 @@ def mod(n):
             enum(f"m{n}_on",  f"ON{n}",  f"Mod{n} On",     ONOFF, 0, automatable=False)]
 MODS = [mod(n) for n in range(1, 5)]
 
+# Preset names come from the factory bank so the picker is an ordinary enum —
+# visible on the Global page in Movy, Tablor's editor AND the web panel.
+PRESET_NAMES = []
+for _line in (ROOT / "src" / "presets" / "factory.tbl").read_text().splitlines():
+    if _line and not _line.startswith("#") and "|" in _line:
+        PRESET_NAMES.append(_line.split("|", 1)[0])
+
 GLOBAL = dict(
+    preset = enum("preset", "PRST", "Preset", PRESET_NAMES, 0, automatable=False),
     mode   = enum("voice_mode", "MODE", "Voice Mode", VOICE_MODES, 0),
     voices = num("voices", "VOIC", "Voices", 1, 8, 8),
     glide  = pot("glide", "GLID", "Glide", 0),
@@ -184,8 +192,8 @@ BANKS = [
         row(*(MODS[2] + MODS[3])),
     ]),
     ("Global", True, [
-        row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"], GLOBAL["gmode"],
-            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
+        row(GLOBAL["preset"], GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"],
+            GLOBAL["gmode"], GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
     ]),
 ]
 
@@ -205,7 +213,8 @@ def all_params():
 # macro. u{i} is a 0..127 pot; u{i}_target picks any parameter by name; the
 # DSP writes through (and back-syncs the pot when the target changes).
 BASE_PARAMS = all_params()
-USER_TARGETS = ["None"] + [p["full"] for p in BASE_PARAMS if p["type"] != "file"]
+USER_TARGETS = ["None"] + [p["full"] for p in BASE_PARAMS
+                           if p["type"] != "file" and p["key"] != "preset"]
 
 USER_POTS, USER_SELS = [], []
 for i in range(1, 9):
@@ -422,7 +431,7 @@ lines += [
 # User-macro wiring: pot index, selector index, and option->param-index map.
 target_map = ["-1"]
 for p in BASE_PARAMS:
-    if p["type"] != "file":
+    if p["type"] != "file" and p["key"] != "preset":
         target_map.append(f'TB_P_{p["key"].upper()}')
 lines += [
     "/* User macros: u{i} pots write through to their selected target. */",

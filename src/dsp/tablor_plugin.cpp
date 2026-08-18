@@ -201,7 +201,16 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     }
 
     if (!strcmp(k, "preset")) {
-        int pi = atoi(val);
+        /* accept a preset NAME (Movy/web may echo the enum option) or index */
+        int pi = -1;
+        for (size_t i = 0; i < inst->presets.size(); i++)
+            if (inst->presets[i].name == val) { pi = (int) i; break; }
+        if (pi < 0) {
+            char *end = nullptr;
+            long n2 = strtol(val, &end, 10);
+            if (end == val) return;
+            pi = (int) n2;
+        }
         if (pi < 0 || pi >= (int) inst->presets.size()) return;
         inst->preset_index = pi;
         /* a preset is a full sound: reset to defaults first so nothing
