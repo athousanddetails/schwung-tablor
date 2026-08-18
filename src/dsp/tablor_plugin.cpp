@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <new>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
 
 #include "../host/plugin_api_v1.h"
@@ -48,23 +49,52 @@ struct tablor_instance {
     float *params() { return engine.pots; }
 };
 
+static constexpr int kUserPresetSlots = 8;
+
+static void user_preset_path(tablor_instance *inst, int slot, char *out, size_t cap)
+{
+    snprintf(out, cap, "%s/presets/user/u%d.tbl", inst->module_dir, slot + 1);
+}
+
 static void load_presets(tablor_instance *inst)
 {
     char path[600];
     snprintf(path, sizeof path, "%s/presets/factory.tbl", inst->module_dir);
     FILE *f = fopen(path, "r");
-    if (!f) return;
-    char line[4096];
-    while (fgets(line, sizeof line, f)) {
-        if (line[0] == '#' || line[0] == '\n') continue;
-        char *bar = strchr(line, '|');
-        if (!bar) continue;
-        *bar = 0;
-        char *blob = bar + 1;
-        blob[strcspn(blob, "\r\n")] = 0;
-        inst->presets.push_back({ line, blob });
+    if (f) {
+        char line[4096];
+        while (fgets(line, sizeof line, f)) {
+            if (line[0] == '#' || line[0] == '\n') continue;
+            char *bar = strchr(line, '|');
+            if (!bar) continue;
+            *bar = 0;
+            char *blob = bar + 1;
+            blob[strcspn(blob, "\r\n")] = 0;
+            inst->presets.push_back({ line, blob });
+        }
+        fclose(f);
     }
-    fclose(f);
+
+    /* 8 fixed user slots after the factory bank (old-hardware style).
+     * An empty slot applies defaults (= Init). */
+    snprintf(path, sizeof path, "%s/presets/user", inst->module_dir);
+    ::mkdir(path, 0755);
+    for (int i = 0; i < kUserPresetSlots; i++) {
+        char name[16];
+        snprintf(name, sizeof name, "User %d", i + 1);
+        std::string blob = "TBLR1;";
+        user_preset_path(inst, i, path, sizeof path);
+        FILE *uf = fopen(path, "r");
+        if (uf) {
+            char line[8192];
+            if (fgets(line, sizeof line, uf)) {
+                line[strcspn(line, "\r\n")] = 0;
+                if (!strncmp(line, "TBLR1;", 6)) blob = line;
+            }
+            fclose(uf);
+        }
+        inst->presets.push_back({ name, blob });
+    }
 }
 
 static int param_index(const char *key)
@@ -102,6 +132,31 @@ static float clamp_param(const tb_param_t *p, float v)
     if (v < p->min) v = p->min;
     if (v > p->max) v = p->max;
     return v;
+}
+
+/* Serialize the current sound into inst->state_buf (TBLR1 blob). */
+static void build_state_blob(tablor_instance *inst)
+{
+    int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
+    for (int i = 0; i < TB_PARAM_COUNT; i++) {
+        if (tb_params[i].type == TB_PATH) {
+            const char *path = inst->wt_path[tb_path_slot(i)];
+            if (path[0])
+                o += snprintf(inst->state_buf + o,
+                              sizeof inst->state_buf - (size_t) o,
+                              "%s=%s;", tb_params[i].key, path);
+            continue;
+        }
+        /* preset machinery is not part of a sound */
+        if (!strcmp(tb_params[i].key, "preset") ||
+            !strncmp(tb_params[i].key, "save_", 5))
+            continue;
+        float v = inst->params()[i];
+        if (v == tb_params[i].def) continue;            /* defaults are implicit */
+        o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o,
+                      "%s=%g;", tb_params[i].key, (double) v);
+        if (o >= (int) sizeof inst->state_buf - 64) break;
+    }
 }
 
 static void reset_to_defaults(tablor_instance *inst)
@@ -220,6 +275,29 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         return;
     }
 
+    if (!strcmp(k, "save_preset")) {
+        /* trigger: fires on On/1; the control itself never stores a value */
+        if (strcmp(val, "1") != 0 && strcmp(val, "On") != 0) return;
+        int slot = (int) inst->params()[TB_P_SAVE_TO];
+        if (slot < 0 || slot >= kUserPresetSlots) return;
+        build_state_blob(inst);
+
+        char path[600];
+        user_preset_path(inst, slot, path, sizeof path);
+        FILE *f = fopen(path, "w");
+        if (f) {
+            fputs(inst->state_buf, f);
+            fputc('\n', f);
+            fclose(f);
+        }
+        int entry = (int) inst->presets.size() - kUserPresetSlots + slot;
+        if (entry >= 0 && entry < (int) inst->presets.size()) {
+            inst->presets[(size_t) entry].blob = inst->state_buf;
+            inst->preset_index = entry;    /* you're now ON the saved slot */
+        }
+        return;
+    }
+
     int idx = param_index(k);
     if (idx < 0) return;
     const tb_param_t *p = &tb_params[idx];
@@ -318,22 +396,7 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
 
     if (!strcmp(key, "state")) {
-        int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
-        for (int i = 0; i < TB_PARAM_COUNT; i++) {
-            if (tb_params[i].type == TB_PATH) {
-                const char *path = inst->wt_path[tb_path_slot(i)];
-                if (path[0])
-                    o += snprintf(inst->state_buf + o,
-                                  sizeof inst->state_buf - (size_t) o,
-                                  "%s=%s;", tb_params[i].key, path);
-                continue;
-            }
-            float v = inst->params()[i];
-            if (v == tb_params[i].def) continue;        /* defaults are implicit */
-            o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o,
-                          "%s=%g;", tb_params[i].key, (double) v);
-            if (o >= (int) sizeof inst->state_buf - 64) break;
-        }
+        build_state_blob(inst);
         return write_str(buf, buf_len, inst->state_buf);
     }
 

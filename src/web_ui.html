@@ -80,7 +80,19 @@
     lab.title = slot.full + " (" + slot.k + ")";
     row.appendChild(lab);
 
-    if (slot.t === "file") {
+    if (slot.b === "trigger") {
+      var btn = document.createElement("button");
+      btn.textContent = "Save";
+      btn.style.cssText = "flex:1;background:var(--acc);color:#111;border:0;" +
+        "border-radius:4px;padding:4px;font-weight:600;cursor:pointer";
+      btn.addEventListener("click", function () {
+        schwungRemote.setParam(K + slot.k, "1");
+        btn.textContent = "Saved ✓";
+        setTimeout(function () { btn.textContent = "Save"; }, 1200);
+      });
+      row.appendChild(btn);
+      controls[slot.k] = { set: function () {} };
+    } else if (slot.t === "file") {
       var f = document.createElement("div");
       f.className = "file";
       f.textContent = "Init (built-in)";

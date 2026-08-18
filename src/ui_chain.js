@@ -173,6 +173,15 @@
         lastTouched = ki;
         if (!slot) { dirty = true; return; }
 
+        if (slot.b === "trigger") {          /* one-shot: clockwise fires */
+            if (delta > 0) {
+                setParam(slot.k, "1");
+                lastHeader = "SAVED";
+            }
+            dirty = true;
+            return;
+        }
+
         if (slot.t === "file") { stepFile(slot, delta); return; }
 
         var max = slot.t === "enum" ? (slot.options.length - 1) : (slot.max | 0);
@@ -300,7 +309,10 @@
                 lbl = tgt.n;
             }
             var v = vals[slot.k];
-            if (slot.t === "file") {
+            if (slot.b === "trigger") {
+                draw_rect(x + 4, y + 2, 24, 11, 1);
+                print(x + 6 + ((20 - text_width("PUSH")) >> 1), y + 4, "PUSH", 1);
+            } else if (slot.t === "file") {
                 draw_rect(x + 1, y + 1, 30, 12, 1);
                 var name = baseName(v);
                 while (text_width(name) > 26 && name.length > 1)

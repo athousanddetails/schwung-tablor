@@ -260,7 +260,7 @@ int main(int argc, char **argv)
     /* ---- factory presets: count/name served, applying CHANGES params,
      * and switching presets resets what the previous one touched ---- */
     n = api->get_param(inst, "preset_count", buf, sizeof buf);
-    CHECK(n > 0 && atoi(buf) == 8, "preset_count = 8 (got \"%s\")", buf);
+    CHECK(n > 0 && atoi(buf) == 16, "preset_count = 16 (8 factory + 8 user slots, got \"%s\")", buf);
 
     api->set_param(inst, "preset", "2");                /* Neu Bass: mono */
     api->get_param(inst, "preset_name", buf, sizeof buf);
@@ -289,6 +289,18 @@ int main(int argc, char **argv)
     }
     CHECK(pPeak > 1000, "Glass Bells makes sound (peak %ld)", pPeak);
     api->on_midi(inst, all_off, 3, 0);
+
+    /* save into User 3, mangle, recall — the full save/recall loop */
+    api->set_param(inst, "flt_freq", "42");
+    api->set_param(inst, "save_to", "User 3");
+    api->set_param(inst, "save_preset", "1");
+    api->get_param(inst, "preset_name", buf, sizeof buf);
+    CHECK(!strcmp(buf, "User 3"), "save lands on User 3 (\"%s\")", buf);
+    api->set_param(inst, "flt_freq", "127");
+    api->set_param(inst, "preset", "User 3");           /* recall by name */
+    api->get_param(inst, "flt_freq", buf, sizeof buf);
+    CHECK(!strcmp(buf, "42"), "User 3 recalls saved flt_freq (\"%s\")", buf);
+
     api->set_param(inst, "preset", "0");
 
     api->destroy_instance(inst);

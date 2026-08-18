@@ -137,15 +137,24 @@ def mod(n):
             enum(f"m{n}_on",  f"ON{n}",  f"Mod{n} On",     ONOFF, 0, automatable=False)]
 MODS = [mod(n) for n in range(1, 5)]
 
-# Preset names come from the factory bank so the picker is an ordinary enum —
-# visible on the Global page in Movy, Tablor's editor AND the web panel.
+# Preset names come from the factory bank + 8 fixed user slots, so the picker
+# is an ordinary static enum that works in Movy, Tablor's editor AND the web
+# panel. Save writes the current sound into the chosen user slot.
 PRESET_NAMES = []
 for _line in (ROOT / "src" / "presets" / "factory.tbl").read_text().splitlines():
     if _line and not _line.startswith("#") and "|" in _line:
         PRESET_NAMES.append(_line.split("|", 1)[0])
+USER_SLOTS = [f"User {i}" for i in range(1, 9)]
+PRESET_OPTIONS = PRESET_NAMES + USER_SLOTS
+
+PRESET_PAGE = dict(
+    preset = enum("preset", "PRST", "Preset", PRESET_OPTIONS, 0, automatable=False),
+    saveto = enum("save_to", "SAVTO", "Save To", USER_SLOTS, 0, automatable=False),
+    save   = enum("save_preset", "SAVE", "Save Preset", ONOFF, 0,
+                  automatable=False, behavior="trigger"),
+)
 
 GLOBAL = dict(
-    preset = enum("preset", "PRST", "Preset", PRESET_NAMES, 0, automatable=False),
     mode   = enum("voice_mode", "MODE", "Voice Mode", VOICE_MODES, 0),
     voices = num("voices", "VOIC", "Voices", 1, 8, 8),
     glide  = pot("glide", "GLID", "Glide", 0),
@@ -162,6 +171,9 @@ def row(*slots):
     return out
 
 BANKS = [
+    ("Preset", True, [
+        row(PRESET_PAGE["preset"], PRESET_PAGE["saveto"], PRESET_PAGE["save"]),
+    ]),
     ("Osc", False, [
         row(O1["table"], O2["table"], O1["pos"], O2["pos"],
             O1["level"], O2["level"], O1["tune"], O2["tune"]),
@@ -192,8 +204,8 @@ BANKS = [
         row(*(MODS[2] + MODS[3])),
     ]),
     ("Global", True, [
-        row(GLOBAL["preset"], GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"],
-            GLOBAL["gmode"], GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
+        row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"], GLOBAL["gmode"],
+            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
     ]),
 ]
 
@@ -213,8 +225,9 @@ def all_params():
 # macro. u{i} is a 0..127 pot; u{i}_target picks any parameter by name; the
 # DSP writes through (and back-syncs the pot when the target changes).
 BASE_PARAMS = all_params()
+NOT_TARGETS = {"preset", "save_to", "save_preset"}
 USER_TARGETS = ["None"] + [p["full"] for p in BASE_PARAMS
-                           if p["type"] != "file" and p["key"] != "preset"]
+                           if p["type"] != "file" and p["key"] not in NOT_TARGETS]
 
 USER_POTS, USER_SELS = [], []
 for i in range(1, 9):
@@ -251,6 +264,7 @@ def movy_slot(p):
 # bankGroups is one entry PER BANK but indexed PER PAGE, so a multi-row bank
 # shifts every following page label. One bank per page, named like ui_chain.
 MOVY_PAGE_NAMES = {
+    ("Preset", 0): "Preset",
     ("Osc", 0): "Osc",    ("Osc", 1): "Unison",  ("Osc", 2): "Shape",
     ("Filter", 0): "Filter",
     ("Env", 0): "Env", ("Env", 1): "Env+",
@@ -299,6 +313,7 @@ assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim
 # NOTE: the module must NOT serve ui_hierarchy — the Shadow UI's hierarchy
 # editor takes precedence over ui_chain.js whenever a module offers one.
 PAGE_MAP = [  # (bank name, row index, page title). Section = bank name.
+    ("Preset", 0, "PRESET"),
     ("Osc",    0, "OSC"),
     ("Osc",    1, "UNISON"),
     ("Osc",    2, "SHAPE"),
@@ -322,6 +337,8 @@ def page_slot(p):
         d["options"] = p["options"]
     elif p["type"] == "int":
         d["min"], d["max"] = p["min"], p["max"]
+    if p.get("behavior"):
+        d["b"] = p["behavior"]
     return d
 
 def build_pages():
@@ -431,7 +448,7 @@ lines += [
 # User-macro wiring: pot index, selector index, and option->param-index map.
 target_map = ["-1"]
 for p in BASE_PARAMS:
-    if p["type"] != "file" and p["key"] != "preset":
+    if p["type"] != "file" and p["key"] not in NOT_TARGETS:
         target_map.append(f'TB_P_{p["key"].upper()}')
 lines += [
     "/* User macros: u{i} pots write through to their selected target. */",
