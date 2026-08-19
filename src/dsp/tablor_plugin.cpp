@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstdint>
 #include <new>
+#include <algorithm>
+#include <dirent.h>
 #include <string>
 #include <sys/stat.h>
 #include <vector>
@@ -38,10 +40,12 @@ struct tablor_instance {
     /* wavetable selection = absolute file paths ("" = built-in Init) */
     char  wt_path[TB_PATH_COUNT][512] = {};
 
-    /* factory presets (presets/factory.tbl): name + state blob each */
-    struct preset { std::string name, blob; };
+    /* presets: factory (from the module) + UNLIMITED user .tblr files in
+     * the user library (filename = preset name, content = TBLR1 blob) */
+    struct preset { std::string name, blob, path; };   /* path "" = factory */
     std::vector<preset> presets;
     int preset_index = 0;
+    int factory_count = 0;
 
     /* state blob scratch */
     char  state_buf[8 * 1024];
@@ -49,11 +53,139 @@ struct tablor_instance {
     float *params() { return engine.pots; }
 };
 
-static constexpr int kUserPresetSlots = 8;
+/* User presets are plain files the user can copy, share and manage:
+ *   /data/UserData/UserLibrary/Tablor Presets/<Name>.tblr
+ * filename (minus extension) IS the preset name; content is one
+ * TBLR1 state blob line. */
+static constexpr const char *kPresetDir =
+    "/data/UserData/UserLibrary/Tablor Presets";
 
-static void user_preset_path(tablor_instance *inst, int slot, char *out, size_t cap)
+static std::string sanitize_preset_name(const char *raw)
 {
-    snprintf(out, cap, "%s/presets/user/u%d.tbl", inst->module_dir, slot + 1);
+    std::string n;
+    for (const char *s = raw; *s && n.size() < 40; s++) {
+        char c = *s;
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' ||
+            c == '"' || c == '<' || c == '>' || c == '|' || c == ';' ||
+            c == '=' || c == '\n' || c == '\r')
+            c = ' ';
+        n += c;
+    }
+    while (!n.empty() && (n.front() == ' ' || n.front() == '.')) n.erase(0, 1);
+    while (!n.empty() && n.back() == ' ') n.pop_back();
+    if (n.empty()) n = "Untitled";
+    return n;
+}
+
+static std::string preset_file_for(const std::string &name)
+{
+    return std::string(kPresetDir) + "/" + name + ".tblr";
+}
+
+/* A name nobody has yet: "Name", "Name 2", "Name 3", … */
+static std::string unique_preset_name(const std::string &want)
+{
+    std::string name = want;
+    for (int i = 2; i < 1000; i++) {
+        struct stat st;
+        if (::stat(preset_file_for(name).c_str(), &st) != 0)
+            return name;
+        name = want + " " + std::to_string(i);
+    }
+    return want;
+}
+
+static bool read_blob_file(const char *path, std::string &blob)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    char line[8192];
+    bool ok = false;
+    if (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        const char *b = line;
+        const char *bar = strchr(line, '|');    /* legacy "Name|blob" lines */
+        if (bar) b = bar + 1;
+        if (!strncmp(b, "TBLR1;", 6)) { blob = b; ok = true; }
+    }
+    fclose(f);
+    return ok;
+}
+
+static void write_preset_file(const std::string &path, const char *blob)
+{
+    FILE *f = fopen(path.c_str(), "w");
+    if (f) {
+        fputs(blob, f);
+        fputc('\n', f);
+        fclose(f);
+    }
+}
+
+/* One-time migration of the old fixed-slot files (presets/user/uN.tbl). */
+static void migrate_old_user_slots(tablor_instance *inst)
+{
+    for (int i = 0; i < 8; i++) {
+        char old[600];
+        snprintf(old, sizeof old, "%s/presets/user/u%d.tbl",
+                 inst->module_dir, i + 1);
+        FILE *f = fopen(old, "r");
+        if (!f) continue;
+        char line[8192];
+        std::string name = "User " + std::to_string(i + 1), blob;
+        if (fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            char *bar = strchr(line, '|');
+            const char *b = line;
+            if (bar) { *bar = 0; if (line[0]) name = line; b = bar + 1; }
+            if (!strncmp(b, "TBLR1;", 6)) blob = b;
+        }
+        fclose(f);
+        if (!blob.empty() && blob != "TBLR1;")
+            write_preset_file(preset_file_for(unique_preset_name(
+                sanitize_preset_name(name.c_str()))), blob.c_str());
+        ::remove(old);
+    }
+}
+
+/* Re-list the user preset folder (sorted by name, case-insensitive). */
+static void scan_user_presets(tablor_instance *inst)
+{
+    inst->presets.resize((size_t) inst->factory_count);
+
+    std::vector<tablor_instance::preset> user;
+    DIR *d = ::opendir(kPresetDir);
+    if (d) {
+        while (dirent *e = ::readdir(d)) {
+            const char *dot = strrchr(e->d_name, '.');
+            if (!dot || strcasecmp(dot, ".tblr") != 0) continue;
+            std::string path = std::string(kPresetDir) + "/" + e->d_name;
+            std::string blob;
+            if (!read_blob_file(path.c_str(), blob)) continue;
+            user.push_back({ std::string(e->d_name, (size_t) (dot - e->d_name)),
+                             blob, path });
+        }
+        ::closedir(d);
+    }
+    std::sort(user.begin(), user.end(),
+              [](const tablor_instance::preset &a,
+                 const tablor_instance::preset &b) {
+                  return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
+              });
+    for (auto &u : user)
+        inst->presets.push_back(std::move(u));
+
+    if (inst->preset_index >= (int) inst->presets.size())
+        inst->preset_index = 0;
+}
+
+static void select_preset_by_path(tablor_instance *inst, const std::string &path)
+{
+    for (size_t i = 0; i < inst->presets.size(); i++)
+        if (inst->presets[i].path == path) {
+            inst->preset_index = (int) i;
+            return;
+        }
 }
 
 static void load_presets(tablor_instance *inst)
@@ -70,47 +202,15 @@ static void load_presets(tablor_instance *inst)
             *bar = 0;
             char *blob = bar + 1;
             blob[strcspn(blob, "\r\n")] = 0;
-            inst->presets.push_back({ line, blob });
+            inst->presets.push_back({ line, blob, "" });
         }
         fclose(f);
     }
+    inst->factory_count = (int) inst->presets.size();
 
-    /* 8 fixed user slots after the factory bank (old-hardware style).
-     * File format matches factory: "Name|TBLR1;..." — the name is the
-     * user's own. An empty slot applies defaults (= Init). */
-    snprintf(path, sizeof path, "%s/presets/user", inst->module_dir);
-    ::mkdir(path, 0755);
-    for (int i = 0; i < kUserPresetSlots; i++) {
-        char defname[16];
-        snprintf(defname, sizeof defname, "User %d", i + 1);
-        std::string name = defname, blob = "TBLR1;";
-        user_preset_path(inst, i, path, sizeof path);
-        FILE *uf = fopen(path, "r");
-        if (uf) {
-            char line[8192];
-            if (fgets(line, sizeof line, uf)) {
-                line[strcspn(line, "\r\n")] = 0;
-                char *bar = strchr(line, '|');
-                const char *b = line;
-                if (bar) { *bar = 0; if (line[0]) name = line; b = bar + 1; }
-                if (!strncmp(b, "TBLR1;", 6)) blob = b;
-            }
-            fclose(uf);
-        }
-        inst->presets.push_back({ name, blob });
-    }
-}
-
-static void write_user_preset(tablor_instance *inst, int slot,
-                              const std::string &name, const char *blob)
-{
-    char path[600];
-    user_preset_path(inst, slot, path, sizeof path);
-    FILE *f = fopen(path, "w");
-    if (f) {
-        fprintf(f, "%s|%s\n", name.c_str(), blob);
-        fclose(f);
-    }
+    ::mkdir(kPresetDir, 0755);
+    migrate_old_user_slots(inst);
+    scan_user_presets(inst);
 }
 
 static int param_index(const char *key)
@@ -293,48 +393,44 @@ static void tb_set_param(void *instance, const char *key, const char *val)
 
     if (!strcmp(k, "save_preset")) {
         /* Trigger: never stores a value. Destination:
-         *   "slot:N" (N = 1..8)  -> that user slot (the editor's save flow)
-         *   "1" / "On"           -> current User slot, else first empty;
-         *                           refuses when all 8 are taken. */
-        const int userBase = (int) inst->presets.size() - kUserPresetSlots;
-        int slot = -1;
-        if (!strncmp(val, "slot:", 5)) {
-            slot = atoi(val + 5) - 1;
+         *   "new"      -> a fresh .tblr file ("Untitled", "Untitled 2", …)
+         *   "user:N"   -> overwrite the N-th user preset (0-based)
+         *   "1" / "On" -> overwrite the current user preset, else new */
+        build_state_blob(inst);
+        std::string path;
+        if (!strcmp(val, "new")) {
+            path = preset_file_for(unique_preset_name("Untitled"));
+        } else if (!strncmp(val, "user:", 5)) {
+            int ui = inst->factory_count + atoi(val + 5);
+            if (ui < inst->factory_count || ui >= (int) inst->presets.size())
+                return;
+            path = inst->presets[(size_t) ui].path;
         } else if (!strcmp(val, "1") || !strcmp(val, "On")) {
-            if (inst->preset_index >= userBase)
-                slot = inst->preset_index - userBase;
+            if (inst->preset_index >= inst->factory_count)
+                path = inst->presets[(size_t) inst->preset_index].path;
             else
-                for (int i = 0; i < kUserPresetSlots; i++)
-                    if (inst->presets[(size_t) (userBase + i)].blob == "TBLR1;") {
-                        slot = i;
-                        break;
-                    }
+                path = preset_file_for(unique_preset_name("Untitled"));
         } else {
             return;
         }
-        if (slot < 0 || slot >= kUserPresetSlots) return;
-        build_state_blob(inst);
-
-        int entry = userBase + slot;
-        inst->presets[(size_t) entry].blob = inst->state_buf;
-        inst->preset_index = entry;        /* you're now ON the saved slot */
-        write_user_preset(inst, slot, inst->presets[(size_t) entry].name,
-                          inst->state_buf);
+        if (path.empty()) return;
+        write_preset_file(path, inst->state_buf);
+        scan_user_presets(inst);
+        select_preset_by_path(inst, path);
         return;
     }
 
     if (!strcmp(k, "preset_name")) {
-        /* rename the CURRENT slot — user slots only */
-        const int userBase = (int) inst->presets.size() - kUserPresetSlots;
-        if (inst->preset_index < userBase) return;
-        std::string name = val;
-        if (name.empty()) return;
-        for (char &c : name)                       /* keep the file format safe */
-            if (c == '|' || c == ';' || c == '\n' || c == '=') c = ' ';
-        int slot = inst->preset_index - userBase;
-        inst->presets[(size_t) inst->preset_index].name = name;
-        write_user_preset(inst, slot, name,
-                          inst->presets[(size_t) inst->preset_index].blob.c_str());
+        /* rename the CURRENT user preset = rename its file */
+        if (inst->preset_index < inst->factory_count) return;
+        auto &cur = inst->presets[(size_t) inst->preset_index];
+        std::string want = sanitize_preset_name(val);
+        if (want == cur.name) return;
+        std::string newPath = preset_file_for(unique_preset_name(want));
+        write_preset_file(newPath, cur.blob.c_str());
+        ::remove(cur.path.c_str());
+        scan_user_presets(inst);
+        select_preset_by_path(inst, newPath);
         return;
     }
 
@@ -420,6 +516,11 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "preset_count")) {
         char tmp[16];
         snprintf(tmp, sizeof tmp, "%d", (int) inst->presets.size());
+        return write_str(buf, buf_len, tmp);
+    }
+    if (!strcmp(key, "preset_factory_count")) {
+        char tmp[16];
+        snprintf(tmp, sizeof tmp, "%d", inst->factory_count);
         return write_str(buf, buf_len, tmp);
     }
     if (!strcmp(key, "preset")) {

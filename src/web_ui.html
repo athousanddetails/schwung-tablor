@@ -80,7 +80,34 @@
     lab.title = slot.full + " (" + slot.k + ")";
     row.appendChild(lab);
 
-    if (slot.b === "trigger") {
+    if (slot.k === "preset") {
+      /* unlimited user presets -> live stepping, not a static dropdown */
+      var wrap = document.createElement("div");
+      wrap.style.cssText = "flex:1;display:flex;gap:6px;align-items:center";
+      var prev = document.createElement("button");
+      var next = document.createElement("button");
+      prev.textContent = "‹"; next.textContent = "›";
+      prev.style.cssText = next.style.cssText =
+        "background:#0c0d10;color:var(--txt);border:1px solid var(--edge);" +
+        "border-radius:4px;width:26px;cursor:pointer";
+      var nameEl = document.createElement("div");
+      nameEl.className = "file";
+      nameEl.textContent = "Init";
+      var idx = 0;
+      prev.addEventListener("click", function () {
+        schwungRemote.setParam(K + "preset", String(Math.max(0, idx - 1)));
+      });
+      next.addEventListener("click", function () {
+        schwungRemote.setParam(K + "preset", String(idx + 1));
+      });
+      wrap.appendChild(prev); wrap.appendChild(nameEl); wrap.appendChild(next);
+      row.appendChild(wrap);
+      controls[slot.k] = { set: function (v) { idx = parseInt(v, 10) || 0; } };
+      schwungRemote.onParamChange(function (params) {
+        if (params[K + "preset_name"] !== undefined)
+          nameEl.textContent = params[K + "preset_name"] || "Init";
+      });
+    } else if (slot.b === "trigger") {
       var btn = document.createElement("button");
       btn.textContent = "Save";
       btn.style.cssText = "flex:1;background:var(--acc);color:#111;border:0;" +

@@ -21,7 +21,10 @@ else stays out of your way.
 - **8 user macros** — map any knob to anything, on the device; assignments
   save with the patch and can be automated
 - **8 voices** polyphonic, or mono with glide/legato
-- **8 factory presets** and a seeded library of **115 wavetables**
+- **8 factory presets** plus **unlimited user presets** — plain `.tblr` files
+  in `UserLibrary/Tablor Presets/`, name-as-filename, copy/share them freely;
+  save + name entirely from the hardware
+- A seeded library of **115 wavetables**
 - **Web panel** — full control surface in the browser at
   `move.local:7700/remote-ui`
 

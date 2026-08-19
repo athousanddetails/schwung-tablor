@@ -144,16 +144,12 @@ PRESET_NAMES = []
 for _line in (ROOT / "src" / "presets" / "factory.tbl").read_text().splitlines():
     if _line and not _line.startswith("#") and "|" in _line:
         PRESET_NAMES.append(_line.split("|", 1)[0])
-USER_SLOTS = [f"User {i}" for i in range(1, 9)]
-PRESET_OPTIONS = PRESET_NAMES + USER_SLOTS
-
-# Save has no destination knob: it overwrites the CURRENT User slot, or the
-# first empty one when a factory preset is selected (refuses when all 8 are
-# full and a factory sound is up — pick a User slot to overwrite instead).
+# User presets are UNLIMITED .tblr files in /data/UserData/UserLibrary/
+# Tablor Presets/ — the live list comes from preset_count/preset_names
+# (Movy's render:'preset' convention; ui_chain and the web panel read the
+# same). The static options here are only the factory fallback.
 PRESET_PAGE = dict(
-    # render:'preset' -> Movy's live preset widget (shows the CURRENT name,
-    # including user renames, via preset_name/preset_names)
-    preset = hint(enum("preset", "PRST", "Preset", PRESET_OPTIONS, 0,
+    preset = hint(enum("preset", "PRST", "Preset", PRESET_NAMES, 0,
                        automatable=False), render="preset"),
     save   = enum("save_preset", "SAVE", "Save Preset", ONOFF, 0,
                   automatable=False, behavior="trigger"),

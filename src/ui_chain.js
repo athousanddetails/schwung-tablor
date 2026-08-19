@@ -71,6 +71,17 @@
         return isNaN(v) ? 0 : v;
     }
 
+    function factoryCount() {
+        if (!has("shadow_get_param")) return 0;
+        var v = parseInt(shadow_get_param(uiSlot(), "synth:preset_factory_count"), 10);
+        return isNaN(v) ? 0 : v;
+    }
+
+    function currentPresetName() {
+        if (!has("shadow_get_param")) return "";
+        return String(shadow_get_param(uiSlot(), "synth:preset_name") || "");
+    }
+
     function has(fn) { return typeof globalThis[fn] === "function"; }
     function uiSlot() { return has("shadow_get_ui_slot") ? shadow_get_ui_slot() : 0; }
     function isFocused() { return mySlot >= 0 && uiSlot() === mySlot; }
@@ -216,13 +227,14 @@
         lastTouched = ki;
         if (!slot) { dirty = true; return; }
 
-        if (slot.b === "trigger") {          /* SAVE: open the slot picker */
+        if (slot.b === "trigger") {          /* SAVE: open the destination list */
             if (detent(slot.k, delta, 3) !== 0) {
-                var names = getPresetNames(true) || [];
-                var userBase = Math.max(0, names.length - 8);
+                getPresetNames(true);
                 var cur = currentPresetIndex();
+                var fc = factoryCount();
+                /* 0 = "+ NEW", 1.. = existing user presets */
                 mode = { type: "save",
-                         sel: cur >= userBase ? cur - userBase : 0 };
+                         sel: cur >= fc ? cur - fc + 1 : 0 };
                 overlay = null;
             }
             dirty = true;
@@ -233,6 +245,10 @@
 
         var max = slot.t === "enum" ? (slot.options.length - 1) : (slot.max | 0);
         var min = slot.t === "enum" ? 0 : (slot.min | 0);
+        if (slot.k === "preset") {           /* live count: user files vary */
+            var pn = getPresetNames() || slot.options;
+            max = pn.length - 1;
+        }
         var step;
         if (slot.t === "enum") {
             /* detented: the encoder streams events far faster than a list
@@ -250,9 +266,9 @@
             vals[slot.k] = v;
             setParam(slot.k, v);
         }
-        if (slot.t === "enum")
-            overlay = { slot: slot, until: Date.now() + 1100 };
-        lastHeader = slot.t === "enum" ? (slot.options[v] || "?") : String(v);
+        var optNames = slot.k === "preset" ? (getPresetNames() || slot.options)
+                                           : slot.options;
+        lastHeader = slot.t === "enum" ? (optNames[v] || "?") : String(v);
         dirty = true;
     }
 
@@ -370,21 +386,29 @@
         dirty = false;
     }
 
+    function saveModeItems() {
+        var names = getPresetNames() || [];
+        var fc = factoryCount();
+        var items = ["+ NEW PRESET"];
+        for (var i = fc; i < names.length; i++) items.push(names[i]);
+        return items;
+    }
+
     function drawSaveMode() {
         clear_screen();
         fill_rect(0, 0, 128, 9, 1);
         print(2, 1, "SAVE TO...", 0);
-        print(126 - text_width("Jog: ok  Back: no"), 1, "Jog: ok  Back: no", 0);
-        var names = getPresetNames() || [];
-        var userBase = Math.max(0, names.length - 8);
+        print(126 - text_width("Jog:ok Back:no"), 1, "Jog:ok Back:no", 0);
+        var items = saveModeItems();
+        if (mode.sel >= items.length) mode.sel = items.length - 1;
         var ROWS = 5, RH = 11;
         var first = mode.sel - (ROWS >> 1);
-        if (first > 8 - ROWS) first = 8 - ROWS;
+        if (first > items.length - ROWS) first = items.length - ROWS;
         if (first < 0) first = 0;
-        for (var r = 0; r < ROWS && first + r < 8; r++) {
+        for (var r = 0; r < ROWS && first + r < items.length; r++) {
             var i = first + r;
             var y = 10 + r * RH;
-            var nm = (i + 1) + ": " + (names[userBase + i] || ("User " + (i + 1)));
+            var nm = items[i];
             while (text_width(nm) > 120 && nm.length > 1)
                 nm = nm.substring(0, nm.length - 1);
             if (i === mode.sel) {
@@ -461,7 +485,9 @@
                     name = name.substring(0, name.length - 1);
                 print(x + 3, y + 3, name, 1);
             } else if (slot.t === "enum") {
-                var txt = (slot.options[v] || "?").substring(0, 5);
+                var opts2 = slot.k === "preset"
+                    ? (getPresetNames() || slot.options) : slot.options;
+                var txt = (opts2[v] || "?").substring(0, 5);
                 draw_rect(x + 2, y + 1, 28, 12, 1);
                 print(x + 4 + ((24 - text_width(txt)) >> 1), y + 3, txt, 1);
             } else {
@@ -519,9 +545,8 @@
     }
 
     function enterNameMode() {
-        var names = getPresetNames(true) || [];
-        var userBase = Math.max(0, names.length - 8);
-        var cur = names[userBase + mode.sel] || ("User " + (mode.sel + 1));
+        getPresetNames(true);
+        var cur = currentPresetName() || "Untitled";
         var chars = cur.substring(0, NAME_MAX).split("");
         while (chars.length < 8) chars.push(" ");
         mode = { type: "name", chars: chars, cursor: 0 };
@@ -533,20 +558,22 @@
         if (!mode) return false;
 
         if (mode.type === "save") {
-            if (d1 === 14 && d2 > 0) {                    /* jog scrolls slots */
+            var last = saveModeItems().length - 1;
+            if (d1 === 14 && d2 > 0) {                    /* jog scrolls */
                 var d = detent("__save", relDelta(d2), 3);
-                if (d) mode.sel = Math.max(0, Math.min(7, mode.sel + d));
+                if (d) mode.sel = Math.max(0, Math.min(last, mode.sel + d));
                 dirty = true;
                 return true;
             }
             if (d1 >= 71 && d1 <= 78 && d2 > 0) {         /* knobs scroll too */
                 var d2v = detent("__save", relDelta(d2), 3);
-                if (d2v) mode.sel = Math.max(0, Math.min(7, mode.sel + d2v));
+                if (d2v) mode.sel = Math.max(0, Math.min(last, mode.sel + d2v));
                 dirty = true;
                 return true;
             }
             if (d1 === 3 && d2 > 0) {                     /* jog click: save */
-                setParam("save_preset", "slot:" + (mode.sel + 1));
+                setParam("save_preset",
+                         mode.sel === 0 ? "new" : "user:" + (mode.sel - 1));
                 enterNameMode();
                 return true;
             }

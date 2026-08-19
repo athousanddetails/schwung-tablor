@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <dlfcn.h>
 #include <ctime>
+#include <sys/stat.h>
 
 #include "../src/host/plugin_api_v1.h"
 
@@ -260,7 +261,11 @@ int main(int argc, char **argv)
     /* ---- factory presets: count/name served, applying CHANGES params,
      * and switching presets resets what the previous one touched ---- */
     n = api->get_param(inst, "preset_count", buf, sizeof buf);
-    CHECK(n > 0 && atoi(buf) == 16, "preset_count = 16 (8 factory + 8 user slots, got \"%s\")", buf);
+    int nPresets = atoi(buf);
+    api->get_param(inst, "preset_factory_count", buf, sizeof buf);
+    int nFactory = atoi(buf);
+    CHECK(nFactory == 8 && nPresets >= nFactory,
+          "preset counts: %d factory, %d total", nFactory, nPresets);
 
     api->set_param(inst, "preset", "2");                /* Neu Bass: mono */
     api->get_param(inst, "preset_name", buf, sizeof buf);
@@ -290,31 +295,46 @@ int main(int argc, char **argv)
     CHECK(pPeak > 1000, "Glass Bells makes sound (peak %ld)", pPeak);
     api->on_midi(inst, all_off, 3, 0);
 
-    /* save/recall loop: select User 3, tweak, save (writes the CURRENT
-     * user slot), mangle, recall — values come back */
-    api->set_param(inst, "preset", "User 3");
+    /* file-based user presets: save NEW -> a .tblr appears, rename moves
+     * the file, recall round-trips, overwrite targets by index */
     api->set_param(inst, "flt_freq", "42");
-    api->set_param(inst, "save_preset", "1");
+    api->set_param(inst, "save_preset", "new");
     api->get_param(inst, "preset_name", buf, sizeof buf);
-    CHECK(!strcmp(buf, "User 3"), "save stays on User 3 (\"%s\")", buf);
+    CHECK(!strncmp(buf, "Untitled", 8), "save new -> \"%s\"", buf);
+    api->get_param(inst, "preset_count", buf, sizeof buf);
+    CHECK(atoi(buf) == nPresets + 1, "preset_count grew to %s", buf);
+
+    api->set_param(inst, "preset_name", "LOADTEST SOUND");
+    api->get_param(inst, "preset_name", buf, sizeof buf);
+    CHECK(!strcmp(buf, "LOADTEST SOUND"), "rename (file move) -> \"%s\"", buf);
+    {
+        struct stat st;
+        CHECK(stat("/data/UserData/UserLibrary/Tablor Presets/"
+                   "LOADTEST SOUND.tblr", &st) == 0,
+              "renamed .tblr file exists in the user library");
+    }
+
     api->set_param(inst, "flt_freq", "127");
-    api->set_param(inst, "preset", "User 3");           /* recall by name */
+    api->set_param(inst, "preset", "LOADTEST SOUND");   /* recall by name */
     api->get_param(inst, "flt_freq", buf, sizeof buf);
-    CHECK(!strcmp(buf, "42"), "User 3 recalls saved flt_freq (\"%s\")", buf);
+    CHECK(!strcmp(buf, "42"), "recall restores flt_freq (\"%s\")", buf);
 
-    /* naming: rename the current user slot, list reflects it */
-    api->set_param(inst, "preset_name", "ACID LEAD");
-    api->get_param(inst, "preset_name", buf, sizeof buf);
-    CHECK(!strcmp(buf, "ACID LEAD"), "rename current slot -> \"%s\"", buf);
     n = api->get_param(inst, "preset_names", big, sizeof big);
-    CHECK(n > 2 && big[0] == '[' && strstr(big, "\"ACID LEAD\"") &&
-          strstr(big, "\"Neu Bass\""), "preset_names JSON has custom + factory");
-    api->set_param(inst, "preset_name", "User 3");      /* restore for reruns */
+    CHECK(n > 2 && big[0] == '[' && strstr(big, "\"LOADTEST SOUND\"") &&
+          strstr(big, "\"Neu Bass\""), "preset_names JSON has user + factory");
 
-    /* targeted save: slot:5 */
-    api->set_param(inst, "save_preset", "slot:5");
-    api->get_param(inst, "preset_name", buf, sizeof buf);
-    CHECK(!strcmp(buf, "User 5"), "save slot:5 lands on User 5 (\"%s\")", buf);
+    /* overwrite by user index, then clean up the test file */
+    api->get_param(inst, "preset", buf, sizeof buf);
+    int userIdx = atoi(buf) - nFactory;
+    char cmd[32];
+    snprintf(cmd, sizeof cmd, "user:%d", userIdx);
+    api->set_param(inst, "flt_res", "99");
+    api->set_param(inst, "save_preset", cmd);
+    api->set_param(inst, "flt_res", "0");
+    api->set_param(inst, "preset", "LOADTEST SOUND");
+    api->get_param(inst, "flt_res", buf, sizeof buf);
+    CHECK(!strcmp(buf, "99"), "overwrite user:%d round-trips (\"%s\")", userIdx, buf);
+    remove("/data/UserData/UserLibrary/Tablor Presets/LOADTEST SOUND.tblr");
 
     api->set_param(inst, "preset", "0");
 
