@@ -302,6 +302,20 @@ int main(int argc, char **argv)
     api->get_param(inst, "flt_freq", buf, sizeof buf);
     CHECK(!strcmp(buf, "42"), "User 3 recalls saved flt_freq (\"%s\")", buf);
 
+    /* naming: rename the current user slot, list reflects it */
+    api->set_param(inst, "preset_name", "ACID LEAD");
+    api->get_param(inst, "preset_name", buf, sizeof buf);
+    CHECK(!strcmp(buf, "ACID LEAD"), "rename current slot -> \"%s\"", buf);
+    n = api->get_param(inst, "preset_names", big, sizeof big);
+    CHECK(n > 2 && big[0] == '[' && strstr(big, "\"ACID LEAD\"") &&
+          strstr(big, "\"Neu Bass\""), "preset_names JSON has custom + factory");
+    api->set_param(inst, "preset_name", "User 3");      /* restore for reruns */
+
+    /* targeted save: slot:5 */
+    api->set_param(inst, "save_preset", "slot:5");
+    api->get_param(inst, "preset_name", buf, sizeof buf);
+    CHECK(!strcmp(buf, "User 5"), "save slot:5 lands on User 5 (\"%s\")", buf);
+
     api->set_param(inst, "preset", "0");
 
     api->destroy_instance(inst);

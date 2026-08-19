@@ -46,6 +46,31 @@
      * fades out after a moment of stillness. */
     var overlay = null;    /* { slot, until } */
 
+    /* Save flow: turn SAVE -> pick a slot (mode 'save') -> jog click ->
+     * name it (mode 'name') -> jog click commits. Back cancels/accepts. */
+    var mode = null;       /* null | {type:'save', sel} | {type:'name', chars, cursor} */
+    var presetNames = null;
+    var CHARSET = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
+    var NAME_MAX = 14;
+
+    function getPresetNames(force) {
+        if (presetNames && !force) return presetNames;
+        presetNames = null;
+        if (has("shadow_get_param")) {
+            try {
+                var raw = shadow_get_param(uiSlot(), "synth:preset_names");
+                if (raw) presetNames = JSON.parse(String(raw));
+            } catch (e) {}
+        }
+        return presetNames;
+    }
+
+    function currentPresetIndex() {
+        if (!has("shadow_get_param")) return 0;
+        var v = parseInt(shadow_get_param(uiSlot(), "synth:preset"), 10);
+        return isNaN(v) ? 0 : v;
+    }
+
     function has(fn) { return typeof globalThis[fn] === "function"; }
     function uiSlot() { return has("shadow_get_ui_slot") ? shadow_get_ui_slot() : 0; }
     function isFocused() { return mySlot >= 0 && uiSlot() === mySlot; }
@@ -191,10 +216,14 @@
         lastTouched = ki;
         if (!slot) { dirty = true; return; }
 
-        if (slot.b === "trigger") {          /* one-shot: a deliberate turn fires */
-            if (detent(slot.k, delta, 4) > 0) {
-                setParam(slot.k, "1");
-                lastHeader = "SAVED";
+        if (slot.b === "trigger") {          /* SAVE: open the slot picker */
+            if (detent(slot.k, delta, 3) !== 0) {
+                var names = getPresetNames(true) || [];
+                var userBase = Math.max(0, names.length - 8);
+                var cur = currentPresetIndex();
+                mode = { type: "save",
+                         sel: cur >= userBase ? cur - userBase : 0 };
+                overlay = null;
             }
             dirty = true;
             return;
@@ -209,7 +238,7 @@
             /* detented: the encoder streams events far faster than a list
              * can be read — accumulate and step once per ~3 clicks */
             step = detent(slot.k, delta, 3);
-            overlay = { slot: slot, until: Date.now() + 1100 };
+            overlay = { slot: slot, until: Date.now() + 1400 };
             if (step === 0) { dirty = true; return; }
         } else {
             step = delta;
@@ -312,7 +341,8 @@
     function drawOverlay() {
         clear_screen();
         var slot = overlay.slot;
-        var opts = slot.options;
+        var opts = slot.k === "preset" ? (getPresetNames() || slot.options)
+                                       : slot.options;
         var cur = vals[slot.k] | 0;
 
         fill_rect(0, 0, 128, 9, 1);
@@ -340,7 +370,56 @@
         dirty = false;
     }
 
+    function drawSaveMode() {
+        clear_screen();
+        fill_rect(0, 0, 128, 9, 1);
+        print(2, 1, "SAVE TO...", 0);
+        print(126 - text_width("Jog: ok  Back: no"), 1, "Jog: ok  Back: no", 0);
+        var names = getPresetNames() || [];
+        var userBase = Math.max(0, names.length - 8);
+        var ROWS = 5, RH = 11;
+        var first = mode.sel - (ROWS >> 1);
+        if (first > 8 - ROWS) first = 8 - ROWS;
+        if (first < 0) first = 0;
+        for (var r = 0; r < ROWS && first + r < 8; r++) {
+            var i = first + r;
+            var y = 10 + r * RH;
+            var nm = (i + 1) + ": " + (names[userBase + i] || ("User " + (i + 1)));
+            while (text_width(nm) > 120 && nm.length > 1)
+                nm = nm.substring(0, nm.length - 1);
+            if (i === mode.sel) {
+                fill_rect(0, y, 128, RH, 1);
+                print(3, y + 2, nm, 0);
+            } else {
+                print(3, y + 2, nm, 1);
+            }
+        }
+        dirty = false;
+    }
+
+    function drawNameMode() {
+        clear_screen();
+        fill_rect(0, 0, 128, 9, 1);
+        print(2, 1, "NAME:  Jog: letter", 0);
+        var x = 6, y = 26;
+        for (var i = 0; i < mode.chars.length; i++) {
+            var ch = mode.chars[i];
+            var w = Math.max(text_width(ch), 4) + 2;
+            if (i === mode.cursor) {
+                fill_rect(x - 1, y - 2, w + 1, 13, 1);
+                print(x, y, ch, 0);
+            } else {
+                print(x, y, ch, 1);
+            }
+            x += w + 1;
+        }
+        print(2, 50, "Knob: move  Click: OK", 1);
+        dirty = false;
+    }
+
     function draw() {
+        if (mode && mode.type === "save") { drawSaveMode(); return; }
+        if (mode && mode.type === "name") { drawNameMode(); return; }
         if (overlay) { drawOverlay(); return; }
         clear_screen();
         var page = PAGES[pageIdx];
@@ -430,6 +509,84 @@
         if (dirty) draw();
     }
 
+    function commitName() {
+        var name = mode.chars.join("").replace(/\s+$/, "");
+        if (name) setParam("preset_name", name);
+        getPresetNames(true);
+        mode = null;
+        lastHeader = "SAVED";
+        loadPage();
+    }
+
+    function enterNameMode() {
+        var names = getPresetNames(true) || [];
+        var userBase = Math.max(0, names.length - 8);
+        var cur = names[userBase + mode.sel] || ("User " + (mode.sel + 1));
+        var chars = cur.substring(0, NAME_MAX).split("");
+        while (chars.length < 8) chars.push(" ");
+        mode = { type: "name", chars: chars, cursor: 0 };
+        dirty = true;
+    }
+
+    function modeInput(d1, d2) {
+        /* returns true when the event was consumed by a modal flow */
+        if (!mode) return false;
+
+        if (mode.type === "save") {
+            if (d1 === 14 && d2 > 0) {                    /* jog scrolls slots */
+                var d = detent("__save", relDelta(d2), 3);
+                if (d) mode.sel = Math.max(0, Math.min(7, mode.sel + d));
+                dirty = true;
+                return true;
+            }
+            if (d1 >= 71 && d1 <= 78 && d2 > 0) {         /* knobs scroll too */
+                var d2v = detent("__save", relDelta(d2), 3);
+                if (d2v) mode.sel = Math.max(0, Math.min(7, mode.sel + d2v));
+                dirty = true;
+                return true;
+            }
+            if (d1 === 3 && d2 > 0) {                     /* jog click: save */
+                setParam("save_preset", "slot:" + (mode.sel + 1));
+                enterNameMode();
+                return true;
+            }
+            return true;                                  /* swallow the rest */
+        }
+
+        if (mode.type === "name") {
+            if (d1 === 14 && d2 > 0) {                    /* jog cycles letter */
+                var dd = detent("__name", relDelta(d2), 2);
+                if (dd) {
+                    var ch = mode.chars[mode.cursor] || " ";
+                    var ci = CHARSET.indexOf(ch.toUpperCase());
+                    if (ci < 0) ci = 0;
+                    ci = (ci + dd + CHARSET.length) % CHARSET.length;
+                    mode.chars[mode.cursor] = CHARSET[ci];
+                }
+                dirty = true;
+                return true;
+            }
+            if (d1 >= 71 && d1 <= 78 && d2 > 0) {         /* any knob moves cursor */
+                var dc = detent("__ncur", relDelta(d2), 3);
+                if (dc) {
+                    mode.cursor += dc;
+                    if (mode.cursor < 0) mode.cursor = 0;
+                    if (mode.cursor >= NAME_MAX) mode.cursor = NAME_MAX - 1;
+                    while (mode.chars.length <= mode.cursor)
+                        mode.chars.push(" ");
+                }
+                dirty = true;
+                return true;
+            }
+            if (d1 === 3 && d2 > 0) {                     /* jog click: done */
+                commitName();
+                return true;
+            }
+            return true;
+        }
+        return false;
+    }
+
     function onMidiMessageInternal(data) {
         if (!isFocused()) return;
 
@@ -438,6 +595,8 @@
         var d2 = data[2];
 
         if (status !== 0xB0) return;
+
+        if (modeInput(d1, d2)) return;
 
         var shiftHeld = has("shadow_get_shift_held") && shadow_get_shift_held();
 
@@ -463,7 +622,24 @@
 
     function onMidiMessageExternal(data) {}
 
-    function handleBack() { return false; }
+    function handleBack() {
+        if (mode && mode.type === "name") {   /* Back = accept the name */
+            commitName();
+            dirty = true;
+            return true;
+        }
+        if (mode) {                           /* Back = cancel the save */
+            mode = null;
+            dirty = true;
+            return true;
+        }
+        if (overlay) {
+            overlay = null;
+            dirty = true;
+            return true;
+        }
+        return false;
+    }
 
     globalThis.chain_ui = {
         init: init,

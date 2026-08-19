@@ -30,7 +30,8 @@
        "User 7",
        "User 8"
       ],
-      "automatable": false
+      "automatable": false,
+      "render": "preset"
      },
      {
       "key": "save_preset",

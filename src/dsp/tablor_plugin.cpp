@@ -76,24 +76,40 @@ static void load_presets(tablor_instance *inst)
     }
 
     /* 8 fixed user slots after the factory bank (old-hardware style).
-     * An empty slot applies defaults (= Init). */
+     * File format matches factory: "Name|TBLR1;..." — the name is the
+     * user's own. An empty slot applies defaults (= Init). */
     snprintf(path, sizeof path, "%s/presets/user", inst->module_dir);
     ::mkdir(path, 0755);
     for (int i = 0; i < kUserPresetSlots; i++) {
-        char name[16];
-        snprintf(name, sizeof name, "User %d", i + 1);
-        std::string blob = "TBLR1;";
+        char defname[16];
+        snprintf(defname, sizeof defname, "User %d", i + 1);
+        std::string name = defname, blob = "TBLR1;";
         user_preset_path(inst, i, path, sizeof path);
         FILE *uf = fopen(path, "r");
         if (uf) {
             char line[8192];
             if (fgets(line, sizeof line, uf)) {
                 line[strcspn(line, "\r\n")] = 0;
-                if (!strncmp(line, "TBLR1;", 6)) blob = line;
+                char *bar = strchr(line, '|');
+                const char *b = line;
+                if (bar) { *bar = 0; if (line[0]) name = line; b = bar + 1; }
+                if (!strncmp(b, "TBLR1;", 6)) blob = b;
             }
             fclose(uf);
         }
         inst->presets.push_back({ name, blob });
+    }
+}
+
+static void write_user_preset(tablor_instance *inst, int slot,
+                              const std::string &name, const char *blob)
+{
+    char path[600];
+    user_preset_path(inst, slot, path, sizeof path);
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "%s|%s\n", name.c_str(), blob);
+        fclose(f);
     }
 }
 
@@ -276,36 +292,49 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     }
 
     if (!strcmp(k, "save_preset")) {
-        /* trigger: fires on On/1; the control itself never stores a value.
-         * Destination: the CURRENT User slot; from a factory sound, the
-         * first empty User slot; refuse if all are taken. */
-        if (strcmp(val, "1") != 0 && strcmp(val, "On") != 0) return;
+        /* Trigger: never stores a value. Destination:
+         *   "slot:N" (N = 1..8)  -> that user slot (the editor's save flow)
+         *   "1" / "On"           -> current User slot, else first empty;
+         *                           refuses when all 8 are taken. */
         const int userBase = (int) inst->presets.size() - kUserPresetSlots;
         int slot = -1;
-        if (inst->preset_index >= userBase)
-            slot = inst->preset_index - userBase;
-        else
-            for (int i = 0; i < kUserPresetSlots; i++)
-                if (inst->presets[(size_t) (userBase + i)].blob == "TBLR1;") {
-                    slot = i;
-                    break;
-                }
+        if (!strncmp(val, "slot:", 5)) {
+            slot = atoi(val + 5) - 1;
+        } else if (!strcmp(val, "1") || !strcmp(val, "On")) {
+            if (inst->preset_index >= userBase)
+                slot = inst->preset_index - userBase;
+            else
+                for (int i = 0; i < kUserPresetSlots; i++)
+                    if (inst->presets[(size_t) (userBase + i)].blob == "TBLR1;") {
+                        slot = i;
+                        break;
+                    }
+        } else {
+            return;
+        }
         if (slot < 0 || slot >= kUserPresetSlots) return;
         build_state_blob(inst);
 
-        char path[600];
-        user_preset_path(inst, slot, path, sizeof path);
-        FILE *f = fopen(path, "w");
-        if (f) {
-            fputs(inst->state_buf, f);
-            fputc('\n', f);
-            fclose(f);
-        }
-        int entry = (int) inst->presets.size() - kUserPresetSlots + slot;
-        if (entry >= 0 && entry < (int) inst->presets.size()) {
-            inst->presets[(size_t) entry].blob = inst->state_buf;
-            inst->preset_index = entry;    /* you're now ON the saved slot */
-        }
+        int entry = userBase + slot;
+        inst->presets[(size_t) entry].blob = inst->state_buf;
+        inst->preset_index = entry;        /* you're now ON the saved slot */
+        write_user_preset(inst, slot, inst->presets[(size_t) entry].name,
+                          inst->state_buf);
+        return;
+    }
+
+    if (!strcmp(k, "preset_name")) {
+        /* rename the CURRENT slot — user slots only */
+        const int userBase = (int) inst->presets.size() - kUserPresetSlots;
+        if (inst->preset_index < userBase) return;
+        std::string name = val;
+        if (name.empty()) return;
+        for (char &c : name)                       /* keep the file format safe */
+            if (c == '|' || c == ';' || c == '\n' || c == '=') c = ' ';
+        int slot = inst->preset_index - userBase;
+        inst->presets[(size_t) inst->preset_index].name = name;
+        write_user_preset(inst, slot, name,
+                          inst->presets[(size_t) inst->preset_index].blob.c_str());
         return;
     }
 
@@ -404,6 +433,25 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
             return write_str(buf, buf_len, "");
         return write_str(buf, buf_len,
                          inst->presets[(size_t) inst->preset_index].name.c_str());
+    }
+    if (!strcmp(key, "preset_names")) {
+        /* JSON array — Movy's buildPresetParam convention, also used by
+         * ui_chain's list overlay and the web panel. */
+        int o = 0;
+        buf[o++] = '[';
+        for (size_t i = 0; i < inst->presets.size() && o < buf_len - 8; i++) {
+            if (i) buf[o++] = ',';
+            buf[o++] = '"';
+            for (const char *s = inst->presets[i].name.c_str();
+                 *s && o < buf_len - 8; s++) {
+                if (*s == '"' || *s == '\\') buf[o++] = '\\';
+                buf[o++] = *s;
+            }
+            buf[o++] = '"';
+        }
+        buf[o++] = ']';
+        buf[o] = 0;
+        return o;
     }
 
     if (!strcmp(key, "state")) {

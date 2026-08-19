@@ -151,7 +151,10 @@ PRESET_OPTIONS = PRESET_NAMES + USER_SLOTS
 # first empty one when a factory preset is selected (refuses when all 8 are
 # full and a factory sound is up — pick a User slot to overwrite instead).
 PRESET_PAGE = dict(
-    preset = enum("preset", "PRST", "Preset", PRESET_OPTIONS, 0, automatable=False),
+    # render:'preset' -> Movy's live preset widget (shows the CURRENT name,
+    # including user renames, via preset_name/preset_names)
+    preset = hint(enum("preset", "PRST", "Preset", PRESET_OPTIONS, 0,
+                       automatable=False), render="preset"),
     save   = enum("save_preset", "SAVE", "Save Preset", ONOFF, 0,
                   automatable=False, behavior="trigger"),
 )

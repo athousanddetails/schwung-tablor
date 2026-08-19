@@ -144,6 +144,34 @@
       root.appendChild(p);
     });
 
+    /* rename box in the Preset panel: renames the CURRENT User slot */
+    var presetPanel = root.querySelector(".panel.preset");
+    if (presetPanel) {
+      var row = document.createElement("div");
+      row.className = "ctl";
+      var lab = document.createElement("label");
+      lab.textContent = "Name";
+      var inp = document.createElement("input");
+      inp.type = "text";
+      inp.maxLength = 14;
+      inp.style.cssText = "flex:1;background:#0c0d10;color:var(--txt);" +
+        "border:1px solid var(--edge);border-radius:4px;padding:3px 6px;font-size:11px";
+      var ok = document.createElement("button");
+      ok.textContent = "Rename";
+      ok.style.cssText = "background:var(--acc2);color:#111;border:0;" +
+        "border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer";
+      ok.addEventListener("click", function () {
+        if (inp.value.trim())
+          schwungRemote.setParam(K + "preset_name", inp.value.trim());
+      });
+      row.appendChild(lab); row.appendChild(inp); row.appendChild(ok);
+      presetPanel.appendChild(row);
+      schwungRemote.onParamChange(function (params) {
+        if (params[K + "preset_name"] !== undefined)
+          inp.placeholder = params[K + "preset_name"];
+      });
+    }
+
     schwungRemote.onParamChange(function (params) {
       for (var key in params) {
         if (key.indexOf(K) !== 0) continue;
