@@ -34,7 +34,7 @@
      },
      {
       "key": "save_to",
-      "short": "SAVTO",
+      "short": "SLOT",
       "full": "Save To",
       "type": "enum",
       "options": [

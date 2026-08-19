@@ -41,6 +41,11 @@
     var userPage = -1;     /* index of the USER page (u1..u8 macro pots) */
     var umapPage = -1;     /* index of the U.MAP page (u*_target enums) */
 
+    /* Elektron/Movy-style enum overlay: turning an enum knob shows the
+     * full-name list; the selection applies LIVE as you turn; the list
+     * fades out after a moment of stillness. */
+    var overlay = null;    /* { slot, until } */
+
     function has(fn) { return typeof globalThis[fn] === "function"; }
     function uiSlot() { return has("shadow_get_ui_slot") ? shadow_get_ui_slot() : 0; }
     function isFocused() { return mySlot >= 0 && uiSlot() === mySlot; }
@@ -194,6 +199,8 @@
             vals[slot.k] = v;
             setParam(slot.k, v);
         }
+        if (slot.t === "enum")
+            overlay = { slot: slot, until: Date.now() + 1100 };
         lastHeader = slot.t === "enum" ? (slot.options[v] || "?") : String(v);
         dirty = true;
     }
@@ -278,7 +285,41 @@
         }
     }
 
+    /* Full-screen enum list: full names, current row inverted, the list
+     * scrolls around the selection (Movy's enum overlay idea). */
+    function drawOverlay() {
+        clear_screen();
+        var slot = overlay.slot;
+        var opts = slot.options;
+        var cur = vals[slot.k] | 0;
+
+        fill_rect(0, 0, 128, 9, 1);
+        print(2, 1, slot.full.toUpperCase(), 0);
+        var pos = (cur + 1) + "/" + opts.length;
+        print(126 - text_width(pos), 1, pos, 0);
+
+        var ROWS = 5, RH = 11;
+        var first = cur - (ROWS >> 1);
+        if (first > opts.length - ROWS) first = opts.length - ROWS;
+        if (first < 0) first = 0;
+        for (var r = 0; r < ROWS && first + r < opts.length; r++) {
+            var i = first + r;
+            var y = 10 + r * RH;
+            var name = opts[i];
+            while (text_width(name) > 120 && name.length > 1)
+                name = name.substring(0, name.length - 1);
+            if (i === cur) {
+                fill_rect(0, y, 128, RH, 1);
+                print(3, y + 2, name, 0);
+            } else {
+                print(3, y + 2, name, 1);
+            }
+        }
+        dirty = false;
+    }
+
     function draw() {
+        if (overlay) { drawOverlay(); return; }
         clear_screen();
         var page = PAGES[pageIdx];
 
@@ -310,8 +351,8 @@
             }
             var v = vals[slot.k];
             if (slot.b === "trigger") {
-                draw_rect(x + 4, y + 2, 24, 11, 1);
-                print(x + 6 + ((20 - text_width("PUSH")) >> 1), y + 4, "PUSH", 1);
+                draw_rect(x + 2, y + 2, 28, 11, 1);
+                print(x + 4 + ((24 - text_width("TURN")) >> 1), y + 4, "TURN", 1);
             } else if (slot.t === "file") {
                 draw_rect(x + 1, y + 1, 30, 12, 1);
                 var name = baseName(v);
@@ -360,6 +401,10 @@
     function tick() {
         var shown = !has("shadow_get_display_mode") || shadow_get_display_mode() === 1;
         if (!shown || !isFocused()) return;
+        if (overlay && Date.now() > overlay.until) {
+            overlay = null;
+            dirty = true;
+        }
         if (dirty) draw();
     }
 
@@ -387,6 +432,7 @@
         /* jog wheel */
         if (d1 === 14 && d2 > 0) {
             var d = relDelta(d2);
+            overlay = null;                 /* jog always returns to the page */
             if (shiftHeld) jumpSection(d);
             else selectPage(pageIdx + (d > 0 ? 1 : -1), true);
             return;

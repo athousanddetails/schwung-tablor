@@ -149,7 +149,7 @@ PRESET_OPTIONS = PRESET_NAMES + USER_SLOTS
 
 PRESET_PAGE = dict(
     preset = enum("preset", "PRST", "Preset", PRESET_OPTIONS, 0, automatable=False),
-    saveto = enum("save_to", "SAVTO", "Save To", USER_SLOTS, 0, automatable=False),
+    saveto = enum("save_to", "SLOT", "Save To", USER_SLOTS, 0, automatable=False),
     save   = enum("save_preset", "SAVE", "Save Preset", ONOFF, 0,
                   automatable=False, behavior="trigger"),
 )
