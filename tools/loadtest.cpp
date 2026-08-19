@@ -290,12 +290,13 @@ int main(int argc, char **argv)
     CHECK(pPeak > 1000, "Glass Bells makes sound (peak %ld)", pPeak);
     api->on_midi(inst, all_off, 3, 0);
 
-    /* save into User 3, mangle, recall — the full save/recall loop */
+    /* save/recall loop: select User 3, tweak, save (writes the CURRENT
+     * user slot), mangle, recall — values come back */
+    api->set_param(inst, "preset", "User 3");
     api->set_param(inst, "flt_freq", "42");
-    api->set_param(inst, "save_to", "User 3");
     api->set_param(inst, "save_preset", "1");
     api->get_param(inst, "preset_name", buf, sizeof buf);
-    CHECK(!strcmp(buf, "User 3"), "save lands on User 3 (\"%s\")", buf);
+    CHECK(!strcmp(buf, "User 3"), "save stays on User 3 (\"%s\")", buf);
     api->set_param(inst, "flt_freq", "127");
     api->set_param(inst, "preset", "User 3");           /* recall by name */
     api->get_param(inst, "flt_freq", buf, sizeof buf);

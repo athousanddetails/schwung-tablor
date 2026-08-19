@@ -51,6 +51,19 @@
     function isFocused() { return mySlot >= 0 && uiSlot() === mySlot; }
     function relDelta(v) { return v < 64 ? v : v - 128; }
 
+    /* Accumulate encoder deltas per key; emit one +/-1 step per `per`
+     * accumulated clicks (direction changes reset the run). */
+    var detentAcc = {};
+    function detent(key, delta, per) {
+        var a = detentAcc[key] || 0;
+        if ((a > 0) !== (delta > 0)) a = 0;      /* direction flip resets */
+        a += delta;
+        if (a >= per)  { detentAcc[key] = 0; return 1; }
+        if (a <= -per) { detentAcc[key] = 0; return -1; }
+        detentAcc[key] = a;
+        return 0;
+    }
+
     function baseName(path) {
         if (!path) return "Init";
         var i = path.lastIndexOf("/");
@@ -178,8 +191,8 @@
         lastTouched = ki;
         if (!slot) { dirty = true; return; }
 
-        if (slot.b === "trigger") {          /* one-shot: clockwise fires */
-            if (delta > 0) {
+        if (slot.b === "trigger") {          /* one-shot: a deliberate turn fires */
+            if (detent(slot.k, delta, 4) > 0) {
                 setParam(slot.k, "1");
                 lastHeader = "SAVED";
             }
@@ -191,7 +204,16 @@
 
         var max = slot.t === "enum" ? (slot.options.length - 1) : (slot.max | 0);
         var min = slot.t === "enum" ? 0 : (slot.min | 0);
-        var step = slot.t === "enum" ? (delta > 0 ? 1 : -1) : delta;
+        var step;
+        if (slot.t === "enum") {
+            /* detented: the encoder streams events far faster than a list
+             * can be read — accumulate and step once per ~3 clicks */
+            step = detent(slot.k, delta, 3);
+            overlay = { slot: slot, until: Date.now() + 1100 };
+            if (step === 0) { dirty = true; return; }
+        } else {
+            step = delta;
+        }
         var v = (vals[slot.k] | 0) + step;
         if (v < min) v = min;
         if (v > max) v = max;

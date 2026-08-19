@@ -276,9 +276,20 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     }
 
     if (!strcmp(k, "save_preset")) {
-        /* trigger: fires on On/1; the control itself never stores a value */
+        /* trigger: fires on On/1; the control itself never stores a value.
+         * Destination: the CURRENT User slot; from a factory sound, the
+         * first empty User slot; refuse if all are taken. */
         if (strcmp(val, "1") != 0 && strcmp(val, "On") != 0) return;
-        int slot = (int) inst->params()[TB_P_SAVE_TO];
+        const int userBase = (int) inst->presets.size() - kUserPresetSlots;
+        int slot = -1;
+        if (inst->preset_index >= userBase)
+            slot = inst->preset_index - userBase;
+        else
+            for (int i = 0; i < kUserPresetSlots; i++)
+                if (inst->presets[(size_t) (userBase + i)].blob == "TBLR1;") {
+                    slot = i;
+                    break;
+                }
         if (slot < 0 || slot >= kUserPresetSlots) return;
         build_state_blob(inst);
 

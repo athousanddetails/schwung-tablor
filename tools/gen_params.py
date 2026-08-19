@@ -147,9 +147,11 @@ for _line in (ROOT / "src" / "presets" / "factory.tbl").read_text().splitlines()
 USER_SLOTS = [f"User {i}" for i in range(1, 9)]
 PRESET_OPTIONS = PRESET_NAMES + USER_SLOTS
 
+# Save has no destination knob: it overwrites the CURRENT User slot, or the
+# first empty one when a factory preset is selected (refuses when all 8 are
+# full and a factory sound is up — pick a User slot to overwrite instead).
 PRESET_PAGE = dict(
     preset = enum("preset", "PRST", "Preset", PRESET_OPTIONS, 0, automatable=False),
-    saveto = enum("save_to", "SLOT", "Save To", USER_SLOTS, 0, automatable=False),
     save   = enum("save_preset", "SAVE", "Save Preset", ONOFF, 0,
                   automatable=False, behavior="trigger"),
 )
@@ -172,7 +174,7 @@ def row(*slots):
 
 BANKS = [
     ("Preset", True, [
-        row(PRESET_PAGE["preset"], PRESET_PAGE["saveto"], PRESET_PAGE["save"]),
+        row(PRESET_PAGE["preset"], PRESET_PAGE["save"]),
     ]),
     ("Osc", False, [
         row(O1["table"], O2["table"], O1["pos"], O2["pos"],
@@ -225,7 +227,7 @@ def all_params():
 # macro. u{i} is a 0..127 pot; u{i}_target picks any parameter by name; the
 # DSP writes through (and back-syncs the pot when the target changes).
 BASE_PARAMS = all_params()
-NOT_TARGETS = {"preset", "save_to", "save_preset"}
+NOT_TARGETS = {"preset", "save_preset"}
 USER_TARGETS = ["None"] + [p["full"] for p in BASE_PARAMS
                            if p["type"] != "file" and p["key"] not in NOT_TARGETS]
 

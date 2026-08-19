@@ -33,23 +33,6 @@
       "automatable": false
      },
      {
-      "key": "save_to",
-      "short": "SLOT",
-      "full": "Save To",
-      "type": "enum",
-      "options": [
-       "User 1",
-       "User 2",
-       "User 3",
-       "User 4",
-       "User 5",
-       "User 6",
-       "User 7",
-       "User 8"
-      ],
-      "automatable": false
-     },
-     {
       "key": "save_preset",
       "short": "SAVE",
       "full": "Save Preset",
@@ -61,6 +44,7 @@
       "automatable": false,
       "behavior": "trigger"
      },
+     null,
      null,
      null,
      null,
