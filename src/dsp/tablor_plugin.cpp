@@ -490,8 +490,10 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "chain_params"))
         return write_str(buf, buf_len, tb_chain_params_json);
 
-    /* ui_hierarchy is deliberately NOT served: the Shadow UI's hierarchy
-     * editor would take precedence over our ui_chain.js (the 9W9 rule). */
+    /* Schwung 0.12+: the stock hierarchy editor (viz graphics, preset
+     * browser, file browser, keyboard) IS Tablor's on-device UI. */
+    if (!strcmp(key, "ui_hierarchy"))
+        return write_str(buf, buf_len, tb_ui_hierarchy_json);
 
     /* Fresh newline-separated list of wavetable files, for ui_chain.js's
      * encoder stepping. Rescan on every call — names-only, a few ms, and

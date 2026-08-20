@@ -1,5 +1,5 @@
 {
-  "_comment": "Proposed entry for charlesvestal/schwung module-catalog.json — submit as a PR after Gus validates the release.",
+  "_comment": "Proposed entry for charlesvestal/schwung module-catalog.json \u2014 submit as a PR after Gus validates the release.",
   "id": "tablor",
   "name": "Tablor",
   "description": "2-osc wavetable synth - 8-voice poly, sub, noise, multimode filter, 2 LFOs, mod matrix, user macros. Serum/Vital/Ableton wavetables via Move Manager.",
@@ -8,5 +8,5 @@
   "github_repo": "athousanddetails/schwung-tablor",
   "default_branch": "main",
   "asset_name": "tablor-module.tar.gz",
-  "min_host_version": "0.9.13"
+  "min_host_version": "0.12.0"
 }

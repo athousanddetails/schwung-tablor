@@ -197,10 +197,17 @@ int main(int argc, char **argv)
     api->on_midi(inst, all_off, 3, 0);
     api->set_param(inst, "flt_freq", "127");
 
-    /* ---- ui_hierarchy must NOT be served: the Shadow UI's hierarchy
-     * editor would override the module's own ui_chain.js (the 9W9 rule) */
+    /* ---- ui_hierarchy: the stock 0.12+ editor is the UI ---- */
     n = api->get_param(inst, "ui_hierarchy", big, sizeof big);
-    CHECK(n < 0, "ui_hierarchy NOT served (ui_chain.js owns the editor)");
+    CHECK(n > 1000 && strstr(big, "\"levels\"") && strstr(big, "\"root\""),
+          "ui_hierarchy served (%d bytes)", n);
+    CHECK(strstr(big, "\"list_param\":\"preset\"") &&
+          strstr(big, "\"preset_name\"") && strstr(big, "\"string\""),
+          "hierarchy has native preset browser + keyboard rename");
+    n = api->get_param(inst, "chain_params", big, sizeof big);
+    CHECK(strstr(big, "\"viz\"") && strstr(big, "\"group\":\"amp\"") &&
+          strstr(big, "\"kind\":\"fader\""),
+          "chain_params declares viz groups");
 
     /* ---- wt_files: the file list ui_chain.js steps through ---- */
     n = api->get_param(inst, "wt_files", big, sizeof big);

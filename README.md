@@ -50,13 +50,16 @@ browse), or encoder-stepping directly from the OSC page.
 
 ## The interface
 
-Tablor ships **three** ways to play it, all driven by one generated parameter
-source so they never disagree:
+Tablor speaks the platform's native language — no custom editor code. Three
+ways to play it, all driven by one generated parameter source so they never
+disagree:
 
-1. **Tablor's own editor** (Shadow UI): 13 pages, jog flips pages, Shift+jog
-   jumps sections, 8 encoders per page. On the USER page, hold Shift and turn
-   a knob to map a macro.
-2. **[Movy](https://github.com/DimaDake/schwung-movy)**: the same 13 pages as
+1. **The stock Shadow UI** (Schwung ≥ 0.12): knob pages with *declared* `viz`
+   graphics — envelopes, filter curve, LFO shapes, faders, switches — plus the
+   native full-screen preset browser, wavetable file browser with live
+   preview, and on-screen keyboard for preset renames. 21 graphics declared,
+   validated by Schwung's own `validate_contract` (zero guesses).
+2. **[Movy](https://github.com/DimaDake/schwung-movy)**: the same pages as
    Movy banks, with live filter curves, dual envelope graphics and LFO
    previews.
 3. **Web panel**: every control in the browser, live in both directions.

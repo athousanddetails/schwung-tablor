@@ -123,10 +123,59 @@ if pages_file.exists():
     for k in page_keys:
         check(k in seen_keys, f"ui_pages key {k} not a real param")
 
-# ---- ui_hierarchy must NOT be emitted (ui_chain.js would be ignored) --
-check("tb_ui_hierarchy_json" not in hdr,
-      "ui_hierarchy absent from params.h (the 9W9 rule)")
-check((ROOT / "src/ui_chain.js").exists(), "ui_chain.js present")
+# ---- ui_hierarchy (the STOCK Schwung 0.12+ editor is the UI) ----------
+m3 = re.search(r'tb_ui_hierarchy_json =\n    "(.*)";', hdr)
+check(m3 is not None, "ui_hierarchy emitted in params.h")
+if m3:
+    hs = m3.group(1).replace('\\"', '"').replace("\\\\", "\\")
+    try:
+        hier = json.loads(hs)
+    except json.JSONDecodeError as e:
+        fails.append(f"ui_hierarchy invalid JSON: {e}")
+        hier = {"levels": {}}
+    levels = hier.get("levels", {})
+    check("root" in levels and "presets" in levels, "root + presets levels exist")
+    pl = levels.get("presets", {})
+    check(pl.get("list_param") == "preset" and pl.get("count_param") == "preset_count"
+          and pl.get("name_param") == "preset_name", "presets level is a browser")
+    nav, hkeys = set(), set()
+    for lid, lv in levels.items():
+        for it in lv.get("params", []):
+            if "level" in it:
+                nav.add(it["level"])
+            else:
+                hkeys.add(it["key"])
+        for kk in lv.get("knobs", []):
+            check(any(it.get("key") == kk for it in lv.get("params", [])),
+                  f"level {lid}: knob {kk} not among its params")
+    for t in nav:
+        check(t in levels, f"nav target {t} missing")
+    for lid in levels:
+        check(lid == "root" or lid in nav, f"level {lid} unreachable")
+    for k in seen_keys:
+        if k not in ("preset",):            # preset is the browser's list_param
+            check(k in hkeys or k in ("save_preset", "preset_name"),
+                  f"movy key {k} missing from hierarchy")
+
+    # viz contiguity: a group's members must sit adjacent within one 4-cell
+    # row of some level's knobs (the 0.12 hard gate, checked at build time)
+    viz_groups = {}
+    for p in chain:
+        v = p.get("viz")
+        if isinstance(v, dict) and v.get("group"):
+            viz_groups.setdefault(v["group"], []).append(p["key"])
+    for g, keys in viz_groups.items():
+        placed = False
+        for lv in levels.values():
+            knobs = lv.get("knobs", [])
+            for rstart in (0, 4):
+                rowk = knobs[rstart:rstart + 4]
+                idxs = [rowk.index(k) for k in keys if k in rowk]
+                if len(idxs) == len(keys):
+                    idxs.sort()
+                    if idxs == list(range(idxs[0], idxs[0] + len(idxs))):
+                        placed = True
+        check(placed, f"viz group '{g}' not contiguous in any 4-cell row")
 
 # ---- module.json under the 8 KB loader cap ----------------------------
 sz = (ROOT / "src/module.json").stat().st_size

@@ -183,8 +183,10 @@ BANKS = [
         row(O1["bend"], O1["formant"], O2["bend"], O2["formant"],
             SUB["tune"]),
     ]),
+    # Stock pages render 2 rows of 4; a viz group must sit contiguously in
+    # one row. freq/res/TYPE first so the filter-curve roles touch.
     ("Filter", False, [
-        row(FILTER["freq"], FILTER["res"], FILTER["env"], FILTER["type"],
+        row(FILTER["freq"], FILTER["res"], FILTER["type"], FILTER["env"],
             SUB["level"], SUB["wave"], NOISE["level"], NOISE["type"]),
     ]),
     # Both envelopes on ONE page: a Movy envelope graphic spans one 4-cell
@@ -196,9 +198,10 @@ BANKS = [
             FEG["a"], FEG["d"], FEG["s"], FEG["r"]),
         row(VCA["vel"], FILTER["key"], FILTER["vel"]),
     ]),
+    # shape/rate/depth/phase = the lfo viz group -> exactly the first row of 4
     ("LFO", False, [
-        row(*[L1[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset")]),
-        row(*[L2[k] for k in ("shape", "rate", "sync", "beat", "depth", "phase", "offset")]),
+        row(*[L1[k] for k in ("shape", "rate", "depth", "phase", "sync", "beat", "offset")]),
+        row(*[L2[k] for k in ("shape", "rate", "depth", "phase", "sync", "beat", "offset")]),
     ]),
     ("Mod", False, [
         row(*(MODS[0] + MODS[1])),
@@ -291,17 +294,54 @@ movy_config = {
 }
 
 # ---------------------------------------------------------------- emit: chain_params
+# Schwung 0.12+ parameter visualisations: DECLARED, not detected (the docs'
+# own advice). Groups must sit contiguously within one 4-cell row — the page
+# layouts above are ordered for exactly that.
+VIZ = {
+    "vca_a": {"group": "amp",  "role": "attack"},
+    "vca_d": {"group": "amp",  "role": "decay"},
+    "vca_s": {"group": "amp",  "role": "sustain"},
+    "vca_r": {"group": "amp",  "role": "release"},
+    "flt_a": {"group": "fenv", "role": "attack"},
+    "flt_d": {"group": "fenv", "role": "decay"},
+    "flt_s": {"group": "fenv", "role": "sustain"},
+    "flt_r": {"group": "fenv", "role": "release"},
+    "flt_freq": {"group": "flt", "role": "cutoff"},
+    "flt_res":  {"group": "flt", "role": "resonance"},
+    "flt_type": {"group": "flt", "role": "mode"},
+    "sub_wave":  {"kind": "waveform"},
+    "wt1_level": {"kind": "fader"},
+    "wt2_level": {"kind": "fader"},
+    "sub_level": {"kind": "fader"},
+    "noise_level": {"kind": "fader"},
+    "volume": {"kind": "fader"},
+    "legato": {"kind": "switch"},
+    "wt1_table": {"kind": "sample"},
+    "wt2_table": {"kind": "sample"},
+    "save_preset": {"kind": "switch"},
+    "m1_on": {"kind": "switch"}, "m2_on": {"kind": "switch"},
+    "m3_on": {"kind": "switch"}, "m4_on": {"kind": "switch"},
+}
+for n in (1, 2):
+    VIZ[f"lfo{n}_shape"] = {"group": f"lfo{n}", "role": "shape"}
+    VIZ[f"lfo{n}_rate"]  = {"group": f"lfo{n}", "role": "rate"}
+    VIZ[f"lfo{n}_depth"] = {"group": f"lfo{n}", "role": "depth"}
+    VIZ[f"lfo{n}_phase"] = {"group": f"lfo{n}", "role": "phase"}
+    VIZ[f"lfo{n}_sync"]  = {"kind": "switch"}
+
 def chain_param(p):
     if p["type"] == "file":
-        return {"key": p["key"], "name": p["full"], "type": "filepath",
-                "root": WT_ROOT, "start_path": WT_ROOT,
-                "filter": WT_FILTER, "live_preview": True, "default": ""}
-    d = {"key": p["key"], "name": p["full"], "type": p["type"]}
-    if p["type"] == "enum":
-        d["options"] = p["options"]
-        d["default"] = p["options"][p["default"]]
+        d = {"key": p["key"], "name": p["full"], "type": "filepath",
+             "root": WT_ROOT, "start_path": WT_ROOT,
+             "filter": WT_FILTER, "live_preview": True, "default": ""}
+    elif p["type"] == "enum":
+        d = {"key": p["key"], "name": p["full"], "type": "enum",
+             "options": p["options"], "default": p["options"][p["default"]]}
     else:
-        d["min"], d["max"], d["default"] = p["min"], p["max"], p["default"]
+        d = {"key": p["key"], "name": p["full"], "type": p["type"],
+             "min": p["min"], "max": p["max"], "default": p["default"]}
+    if p["key"] in VIZ:
+        d["viz"] = VIZ[p["key"]]
     return d
 
 chain = [chain_param(p) for p in PARAMS]
@@ -354,6 +394,72 @@ def build_pages():
     return {"pages": pages}
 
 ui_pages = build_pages()
+
+# ---------------------------------------------------------------- ui_hierarchy
+# Schwung 0.12+: the STOCK hierarchy editor draws knob pages with viz graphics,
+# has a native preset-browser level (list_param/count_param/name_param), a
+# file browser for filepath params, and an on-screen keyboard for `string`
+# params. Tablor no longer ships its own editor — this hierarchy IS the UI.
+def hier_param(p):
+    d = {"key": p["key"], "name": p["full"]}
+    if p["type"] == "file":
+        d.update(type="filepath", root=WT_ROOT, start_path=WT_ROOT,
+                 filter=WT_FILTER, live_preview=True)
+    elif p["type"] == "enum":
+        d.update(type="enum", options=p["options"])
+    else:
+        d.update(type="int", min=p["min"], max=p["max"])
+    return d
+
+def build_hierarchy():
+    rows = {(name, i): r for name, _, rws in BANKS for i, r in enumerate(rws)}
+    levels = {}
+
+    # Dedicated preset BROWSER level (full-screen native list) + save + name.
+    # preset_name is a `string` param: editing opens the stock keyboard and
+    # the DSP renames the current user preset's file.
+    levels["presets"] = {
+        "name": "Presets",
+        "list_param": "preset",
+        "count_param": "preset_count",
+        "name_param": "preset_name",
+        "params": [
+            {"key": "save_preset", "name": "Save Preset", "type": "enum",
+             "options": ONOFF},
+            {"key": "preset_name", "name": "Rename", "type": "string"},
+        ],
+        "knobs": ["save_preset"],
+    }
+
+    level_ids = []
+    for bank, ri, title in PAGE_MAP:
+        if bank == "Preset":
+            continue                      # replaced by the browser level
+        if (bank, ri) == ("Osc", 0):
+            continue                      # root IS the OSC headline page
+        lid = title.lower().replace(" ", "").replace(".", "").replace("-", "")
+        r = rows[(bank, ri)]
+        levels[lid] = {
+            "name": title.title() if title.isupper() else title,
+            "params": [hier_param(s) for s in r if s],
+            "knobs": [s["key"] for s in r if s],
+        }
+        level_ids.append((lid, levels[lid]["name"]))
+
+    # Root: the OSC headline knobs + navigation. Presets first.
+    osc_row = rows[("Osc", 0)]
+    root_params = [{"level": "presets", "label": "Presets"}]
+    root_params += [hier_param(s) for s in osc_row if s]
+    for lid, label in level_ids:
+        root_params.append({"level": lid, "label": label})
+    levels["root"] = {
+        "name": "Tablor",
+        "params": root_params,
+        "knobs": [s["key"] for s in osc_row if s],
+    }
+    return {"levels": levels}
+
+hierarchy_json = json.dumps(build_hierarchy(), separators=(",", ":"))
 
 # ---------------------------------------------------------------- emit: module.json
 module_json = {
@@ -440,9 +546,10 @@ lines += [
     " * is a filepath param; the file browser lists the folder live). */",
     f'static const char *tb_chain_params_json =\n    "{c_escape(chain_json)}";',
     "",
-    "/* NOTE: ui_hierarchy is deliberately NOT served — the Shadow UI's",
-    " * hierarchy editor would take precedence over the module's own",
-    " * ui_chain.js (the 9W9 rule). Movy uses movy_config + chain_params. */",
+    "/* ui_hierarchy for the STOCK Shadow UI (Schwung 0.12+): knob pages",
+    " * with declared viz graphics, native preset browser, file browser,",
+    " * on-screen keyboard for renames. Tablor ships no custom editor. */",
+    f'static const char *tb_ui_hierarchy_json =\n    "{c_escape(hierarchy_json)}";',
     "",
 ]
 

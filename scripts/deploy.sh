@@ -24,20 +24,21 @@ ssh "$HOST" "mkdir -p $DEST/presets"
 scp -q "$SRC/build/dsp.so"          "$HOST:$DEST/dsp.so.new"
 scp -q "$SRC/src/module.json"       "$HOST:$DEST/module.json.new"
 scp -q "$SRC/src/movy_config.json"  "$HOST:$DEST/movy_config.json.new"
-scp -q "$SRC/src/ui_chain.js"       "$HOST:$DEST/ui_chain.js.new"
 scp -q "$SRC/src/ui_pages.json"     "$HOST:$DEST/ui_pages.json.new"
 scp -q "$SRC/src/help.json"         "$HOST:$DEST/help.json"
 scp -q "$SRC/src/web_ui.html"       "$HOST:$DEST/web_ui.html"
 scp -q "$SRC/src/presets/factory.tbl" "$HOST:$DEST/presets/factory.tbl"
 
 # Atomic swap. Do NOT replace this with a direct scp.
+# (also removes the retired custom editor — Schwung 0.12+'s stock
+# hierarchy UI is the interface now)
 ssh "$HOST" "cd $DEST && \
     mv -f dsp.so.new dsp.so && \
     mv -f module.json.new module.json && \
     mv -f movy_config.json.new movy_config.json && \
-    mv -f ui_chain.js.new ui_chain.js && \
     mv -f ui_pages.json.new ui_pages.json && \
-    chmod 755 dsp.so && ls -l dsp.so ui_chain.js ui_pages.json"
+    rm -f ui_chain.js && \
+    chmod 755 dsp.so && ls -l dsp.so module.json"
 
 # Loader test binary (run it on the device: cd $DEST && ./tablor_loadtest ./dsp.so)
 if [ -f "$SRC/build/tablor_loadtest" ]; then
