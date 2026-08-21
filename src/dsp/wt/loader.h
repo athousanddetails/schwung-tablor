@@ -14,6 +14,9 @@
 #include "scanner.h"
 #include "../engine.h"
 #include "../../ported/wav.h"
+#include "../rt.h"
+
+#include <functional>
 
 #include <condition_variable>
 #include <map>
@@ -35,6 +38,26 @@ public:
 
     explicit WtLoader(Engine &engine_) : engine(engine_) {}
 
+    /* Start the worker. Called once from create_instance — which is itself
+     * on the audio callback, so this is the ONE thread we ever spawn. */
+    void start()
+    {
+        std::lock_guard<std::mutex> lk(m);
+        if (!worker.joinable())
+            worker = std::thread([this] { run(); });
+    }
+
+    /* Queue arbitrary off-thread work (file I/O, allocation, scans).
+     * Safe to call from set_param / create_instance: it only appends. */
+    void post(std::function<void()> job)
+    {
+        {
+            std::lock_guard<std::mutex> lk(m);
+            jobs.push_back(std::move(job));
+        }
+        cv.notify_all();
+    }
+
     ~WtLoader()
     {
         {
@@ -53,8 +76,6 @@ public:
             std::lock_guard<std::mutex> lk(m);
             pending[osc & 1] = entry;
             hasPending[osc & 1] = true;
-            if (!worker.joinable())
-                worker = std::thread([this] { run(); });
         }
         cv.notify_all();
     }
@@ -62,20 +83,31 @@ public:
     bool busy() const
     {
         std::lock_guard<std::mutex> lk(m);
-        return hasPending[0] || hasPending[1] || working;
+        return hasPending[0] || hasPending[1] || working || !jobs.empty();
     }
 
 private:
     void run()
     {
+        /* FIRST: shed the SCHED_FIFO 90 inherited from the audio callback,
+         * or this worker starves Move's own audio. */
+        rtDemoteThisThread();
+
         for (;;) {
             WtEntry entry;
             int osc = -1;
+            std::function<void()> job;
             {
                 std::unique_lock<std::mutex> lk(m);
-                cv.wait(lk, [this] { return quit || hasPending[0] || hasPending[1]; });
+                cv.wait(lk, [this] {
+                    return quit || hasPending[0] || hasPending[1] || !jobs.empty();
+                });
                 if (quit) return;
-                for (int i = 0; i < 2; i++) {
+                if (!jobs.empty()) {            /* plain jobs first (init) */
+                    job = std::move(jobs.front());
+                    jobs.erase(jobs.begin());
+                }
+                for (int i = 0; i < 2 && !job; i++) {
                     if (hasPending[i]) {
                         entry = pending[i];
                         hasPending[i] = false;
@@ -84,6 +116,18 @@ private:
                     }
                 }
                 working = true;
+            }
+
+            if (job) {
+                job();
+                std::lock_guard<std::mutex> lk(m);
+                working = false;
+                continue;
+            }
+            if (osc < 0) {
+                std::lock_guard<std::mutex> lk(m);
+                working = false;
+                continue;
             }
 
             std::shared_ptr<Wavetable> table = load(entry);
@@ -178,6 +222,7 @@ private:
     std::condition_variable cv;
     std::thread worker;
     WtEntry pending[2];
+    std::vector<std::function<void()>> jobs;
     bool hasPending[2] = { false, false };
     bool working = false;
     bool quit = false;

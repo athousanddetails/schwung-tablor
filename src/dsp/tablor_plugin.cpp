@@ -18,6 +18,8 @@
 #include <string>
 #include <sys/stat.h>
 #include <vector>
+#include <atomic>
+#include <memory>
 
 #include "../host/plugin_api_v1.h"
 #include "params.h"
@@ -41,11 +43,18 @@ struct tablor_instance {
     char  wt_path[TB_WT_SLOTS][512] = {};
 
     /* presets: factory (from the module) + UNLIMITED user .tblr files in
-     * the user library (filename = preset name, content = TBLR1 blob) */
+     * the user library (filename = preset name, content = TBLR1 blob).
+     *
+     * The worker rebuilds this list whenever the folder changes while the
+     * audio thread reads it in get_param, so it is published as an IMMUTABLE
+     * snapshot and swapped atomically — never mutated in place. */
     struct preset { std::string name, blob, path; };   /* path "" = factory */
-    std::vector<preset> presets;
-    int preset_index = 0;
-    int factory_count = 0;
+    struct PresetList { std::vector<preset> items; int factory_count = 0; };
+    std::shared_ptr<const PresetList> presets { std::make_shared<PresetList>() };
+    std::atomic<int> preset_index { 0 };
+
+    std::shared_ptr<const PresetList> presetList() const
+    { return std::atomic_load(&presets); }
 
     /* state blob scratch */
     char  state_buf[8 * 1024];
@@ -61,13 +70,27 @@ struct tablor_instance {
      * options are the entries in that pack. An enum is turnable AND
      * divable, so hold+click opens a scrolling picker for a long pack.
      *
-     * Rebuilt only when the scan or the pack changes -- NEVER inside
-     * get_param, which runs on the SPI callback (see the note above
-     * tb_chain_params_json). get_param only ever hands out a pointer. */
-    std::vector<std::string> packs;      /* distinct "Pack" prefixes, [0] = All */
-    std::vector<int>         filtered;   /* indices into scanner.list() */
-    int          wt_pack = 0;
-    std::string  chain_params_cache;     /* static head + dynamic options */
+     * Rebuilt only when the scan or the pack changes, on the worker and
+     * NEVER on the SPI callback -- neither in get_param (see the note above
+     * tb_chain_params_json) nor in set_param, which is the same thread.
+     * Published as an immutable snapshot and swapped atomically, exactly
+     * like the preset list: the audio thread only ever takes a pointer. */
+    struct SelSnapshot {
+        std::vector<std::string> packs;    /* "Pack" prefixes, [0] = All    */
+        std::vector<std::string> paths;    /* the whole scan, by index      */
+        std::vector<int>         filtered; /* indices into paths            */
+        std::string chain_params;          /* static head + dynamic options */
+        std::string pack_list;             /* wt_pack_list JSON             */
+    };
+    std::shared_ptr<const SelSnapshot> sel { std::make_shared<SelSnapshot>() };
+    std::atomic<int> wt_pack { 0 };
+
+    std::shared_ptr<const SelSnapshot> selection() const
+    { return std::atomic_load(&sel); }
+
+    /* false until the worker has scanned, loaded presets and published the
+     * Init table; the audio path renders silence in the meantime */
+    std::atomic<bool> ready { false };
 
     float *params() { return engine.pots; }
 };
@@ -167,10 +190,15 @@ static void migrate_old_user_slots(tablor_instance *inst)
     }
 }
 
-/* Re-list the user preset folder (sorted by name, case-insensitive). */
+/* Re-list the user preset folder (sorted by name, case-insensitive).
+ * WORKER THREAD ONLY: does directory I/O, then publishes a new snapshot. */
 static void scan_user_presets(tablor_instance *inst)
 {
-    inst->presets.resize((size_t) inst->factory_count);
+    auto cur = inst->presetList();
+    auto next = std::make_shared<tablor_instance::PresetList>();
+    next->factory_count = cur->factory_count;
+    next->items.assign(cur->items.begin(),
+                       cur->items.begin() + cur->factory_count);
 
     std::vector<tablor_instance::preset> user;
     DIR *d = ::opendir(kPresetDir);
@@ -192,23 +220,27 @@ static void scan_user_presets(tablor_instance *inst)
                   return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
               });
     for (auto &u : user)
-        inst->presets.push_back(std::move(u));
+        next->items.push_back(std::move(u));
 
-    if (inst->preset_index >= (int) inst->presets.size())
+    if (inst->preset_index.load() >= (int) next->items.size())
         inst->preset_index = 0;
+    std::atomic_store(&inst->presets, std::shared_ptr<const tablor_instance::PresetList>(next));
 }
 
 static void select_preset_by_path(tablor_instance *inst, const std::string &path)
 {
-    for (size_t i = 0; i < inst->presets.size(); i++)
-        if (inst->presets[i].path == path) {
+    auto ps = inst->presetList();
+    for (size_t i = 0; i < ps->items.size(); i++)
+        if (ps->items[i].path == path) {
             inst->preset_index = (int) i;
             return;
         }
 }
 
+/* WORKER THREAD ONLY. */
 static void load_presets(tablor_instance *inst)
 {
+    auto boot = std::make_shared<tablor_instance::PresetList>();
     char path[600];
     snprintf(path, sizeof path, "%s/presets/factory.tbl", inst->module_dir);
     FILE *f = fopen(path, "r");
@@ -221,11 +253,12 @@ static void load_presets(tablor_instance *inst)
             *bar = 0;
             char *blob = bar + 1;
             blob[strcspn(blob, "\r\n")] = 0;
-            inst->presets.push_back({ line, blob, "" });
+            boot->items.push_back({ line, blob, "" });
         }
         fclose(f);
     }
-    inst->factory_count = (int) inst->presets.size();
+    boot->factory_count = (int) boot->items.size();
+    std::atomic_store(&inst->presets, std::shared_ptr<const tablor_instance::PresetList>(boot));
 
     ::mkdir(kPresetDir, 0755);
     migrate_old_user_slots(inst);
@@ -251,10 +284,11 @@ static int tb_path_slot(int param_idx)
  * file found. Keep the param's index and the loaded path in step. */
 static void sync_table_index(tablor_instance *inst, int osc)
 {
-    const auto &l = inst->scanner.list();
+    auto snap = inst->selection();
+    const auto &l = snap->paths;
     int idx = 0;
     for (size_t i = 0; i < l.size(); i++)
-        if (l[i].path == inst->wt_path[osc]) { idx = (int) i; break; }
+        if (l[i] == inst->wt_path[osc]) { idx = (int) i; break; }
     inst->params()[osc == 0 ? TB_P_WT1_TABLE : TB_P_WT2_TABLE] = (float) idx;
 }
 
@@ -305,20 +339,9 @@ static void tb_json_append(std::string &out, const std::string &in)
     }
 }
 
-static void tb_rebuild_packs(tablor_instance *inst)
-{
-    inst->packs.clear();
-    inst->packs.push_back("All");
-    for (const auto &e : inst->scanner.list()) {
-        std::string pk = tb_pack_of(e.name);
-        if (pk.empty()) continue;
-        bool seen = false;
-        for (size_t i = 1; i < inst->packs.size(); i++)
-            if (inst->packs[i] == pk) { seen = true; break; }
-        if (!seen) inst->packs.push_back(pk);
-    }
-    if (inst->wt_pack >= (int) inst->packs.size()) inst->wt_pack = 0;
-}
+/* Everything below runs ON THE WORKER: it walks the scan, copies it and
+ * formats ~24 KB of JSON. The audio thread only ever reads the finished
+ * snapshot through inst->selection(). */
 
 /* The host's chain-host parser caps an enum at MAX_ENUM_OPTIONS (128).
  * Past that the knob grid still lists them (the JS parses the JSON
@@ -327,48 +350,70 @@ static void tb_rebuild_packs(tablor_instance *inst)
  * half of the host can see. */
 static const size_t TB_MAX_ENUM_OPTIONS = 128;
 
-static void tb_rebuild_filtered(tablor_instance *inst)
+/* Rebuild the whole selection contract off the current scan and pack.
+ * Worker thread only. Publishes atomically when done. */
+static void tb_publish_selection(tablor_instance *inst)
 {
-    inst->filtered.clear();
+    auto snap = std::make_shared<tablor_instance::SelSnapshot>();
     const auto &l = inst->scanner.list();
-    const bool all = (inst->wt_pack <= 0);
-    const std::string want = all ? std::string()
-                                 : inst->packs[(size_t) inst->wt_pack];
+
+    /* the scan, copied — so the audio thread never reads the scanner while
+     * a rescan is mutating it */
+    snap->paths.reserve(l.size());
+    for (const auto &e : l)
+        snap->paths.push_back(e.path);
+
+    /* packs: the distinct "Pack/" prefixes, All first */
+    snap->packs.push_back("All");
+    for (const auto &e : l) {
+        std::string pk = tb_pack_of(e.name);
+        if (pk.empty()) continue;
+        bool seen = false;
+        for (size_t i = 1; i < snap->packs.size(); i++)
+            if (snap->packs[i] == pk) { seen = true; break; }
+        if (!seen) snap->packs.push_back(pk);
+    }
+
+    int pack = inst->wt_pack.load(std::memory_order_relaxed);
+    if (pack < 0 || pack >= (int) snap->packs.size()) {
+        pack = 0;
+        inst->wt_pack.store(0, std::memory_order_relaxed);
+    }
+
+    /* the entries this pack offers */
+    const bool all = (pack <= 0);
+    const std::string want = all ? std::string() : snap->packs[(size_t) pack];
     for (size_t i = 0; i < l.size(); i++) {
-        if (i == 0) { inst->filtered.push_back(0); continue; }   /* Init */
+        if (i == 0) { snap->filtered.push_back(0); continue; }   /* Init */
         if (all || tb_pack_of(l[i].name) == want)
-            inst->filtered.push_back((int) i);
-        if (inst->filtered.size() >= TB_MAX_ENUM_OPTIONS) break;
+            snap->filtered.push_back((int) i);
+        if (snap->filtered.size() >= TB_MAX_ENUM_OPTIONS) break;
     }
-}
 
-/* Where the currently loaded table sits in the filtered list, or 0. */
-static int tb_select_index(tablor_instance *inst, int osc)
-{
-    const auto &l = inst->scanner.list();
-    for (size_t i = 0; i < inst->filtered.size(); i++) {
-        int g = inst->filtered[i];
-        if (g >= 0 && g < (int) l.size() && l[(size_t) g].path == inst->wt_path[osc])
-            return (int) i;
+    /* wt_pack_list: the items-level rows */
+    std::string &pl = snap->pack_list;
+    pl = "[";
+    for (size_t i = 0; i < snap->packs.size(); i++) {
+        char head[32];
+        snprintf(head, sizeof head, "%s{\"index\":%d,\"label\":\"",
+                 i ? "," : "", (int) i);
+        pl += head;
+        tb_json_append(pl, snap->packs[i]);
+        pl += "\"}";
     }
-    return 0;
-}
+    pl += "]";
 
-/* Static head + the three dynamic entries. Built here so get_param can
- * hand out a pointer and nothing else. */
-static void tb_rebuild_chain_params(tablor_instance *inst)
-{
-    std::string &out = inst->chain_params_cache;
+    /* chain_params: the static head plus the three dynamic entries */
+    std::string &out = snap->chain_params;
     out.assign(tb_chain_params_json);
-    if (out.size() < 2 || out.back() != ']') return;   /* not the shape we expect */
-    out.pop_back();                                     /* drop the closing ] */
-
-    const auto &l = inst->scanner.list();
+    if (out.size() < 2 || out.back() != ']')
+        return;                              /* not the shape we expect */
+    out.pop_back();                          /* drop the closing ] */
 
     out += ",{\"key\":\"wt_pack\",\"name\":\"WT Pack\",\"type\":\"enum\",\"options\":[";
-    for (size_t i = 0; i < inst->packs.size(); i++) {
+    for (size_t i = 0; i < snap->packs.size(); i++) {
         if (i) out += ",";
-        out += "\""; tb_json_append(out, inst->packs[i]); out += "\"";
+        out += "\""; tb_json_append(out, snap->packs[i]); out += "\"";
     }
     out += "]}";
 
@@ -378,8 +423,8 @@ static void tb_rebuild_chain_params(tablor_instance *inst)
                  ",{\"key\":\"wt%d_select\",\"name\":\"WT%d Table\",\"type\":\"enum\",\"options\":[",
                  osc + 1, osc + 1);
         out += head;
-        for (size_t i = 0; i < inst->filtered.size(); i++) {
-            int g = inst->filtered[i];
+        for (size_t i = 0; i < snap->filtered.size(); i++) {
+            int g = snap->filtered[i];
             if (i) out += ",";
             out += "\"";
             tb_json_append(out, g == 0 ? std::string("Init")
@@ -389,21 +434,29 @@ static void tb_rebuild_chain_params(tablor_instance *inst)
         out += "]}";
     }
     out += "]";
+
+    std::atomic_store(&inst->sel,
+                      std::shared_ptr<const tablor_instance::SelSnapshot>(snap));
 }
 
-static void tb_refresh_selection_contract(tablor_instance *inst)
+/* Where the currently loaded table sits in the filtered list, or 0. */
+static int tb_select_index(const tablor_instance::SelSnapshot &snap,
+                           const char *path)
 {
-    tb_rebuild_packs(inst);
-    tb_rebuild_filtered(inst);
-    tb_rebuild_chain_params(inst);
+    for (size_t i = 0; i < snap.filtered.size(); i++) {
+        size_t g = (size_t) snap.filtered[i];
+        if (g < snap.paths.size() && snap.paths[g] == path)
+            return (int) i;
+    }
+    return 0;
 }
 
-/* Select by enum index into the live scan. */
+/* Select by index into the published snapshot. */
 static void set_table_index(tablor_instance *inst, int osc, int idx)
 {
-    const auto &l = inst->scanner.list();
-    if (idx < 0 || idx >= (int) l.size()) return;
-    set_table_path(inst, osc, l[(size_t) idx].path.c_str());
+    auto snap = inst->selection();
+    if (idx < 0 || idx >= (int) snap->paths.size()) return;
+    set_table_path(inst, osc, snap->paths[(size_t) idx].c_str());
 }
 
 static float clamp_param(const tb_param_t *p, float v)
@@ -536,21 +589,22 @@ static void tb_set_param(void *instance, const char *key, const char *val)
 
     if (!strcmp(k, "preset")) {
         /* accept a preset NAME (Movy/web may echo the enum option) or index */
+        auto ps = inst->presetList();
         int pi = -1;
-        for (size_t i = 0; i < inst->presets.size(); i++)
-            if (inst->presets[i].name == val) { pi = (int) i; break; }
+        for (size_t i = 0; i < ps->items.size(); i++)
+            if (ps->items[i].name == val) { pi = (int) i; break; }
         if (pi < 0) {
             char *end = nullptr;
             long n2 = strtol(val, &end, 10);
             if (end == val) return;
             pi = (int) n2;
         }
-        if (pi < 0 || pi >= (int) inst->presets.size()) return;
+        if (pi < 0 || pi >= (int) ps->items.size()) return;
         inst->preset_index = pi;
         /* a preset is a full sound: reset to defaults first so nothing
          * from the previous sound leaks through */
         reset_to_defaults(inst);
-        apply_state_blob(inst, inst->presets[(size_t) pi].blob.c_str());
+        apply_state_blob(inst, ps->items[(size_t) pi].blob.c_str());
         return;
     }
 
@@ -561,39 +615,48 @@ static void tb_set_param(void *instance, const char *key, const char *val)
          *   "1" / "On" -> overwrite the current user preset, else new */
         build_state_blob(inst);
         std::string path;
+        auto ps = inst->presetList();
         if (!strcmp(val, "new")) {
             path = preset_file_for(unique_preset_name("Untitled"));
         } else if (!strncmp(val, "user:", 5)) {
-            int ui = inst->factory_count + atoi(val + 5);
-            if (ui < inst->factory_count || ui >= (int) inst->presets.size())
+            int ui = ps->factory_count + atoi(val + 5);
+            if (ui < ps->factory_count || ui >= (int) ps->items.size())
                 return;
-            path = inst->presets[(size_t) ui].path;
+            path = ps->items[(size_t) ui].path;
         } else if (!strcmp(val, "1") || !strcmp(val, "On")) {
-            if (inst->preset_index >= inst->factory_count)
-                path = inst->presets[(size_t) inst->preset_index].path;
+            if (inst->preset_index.load() >= ps->factory_count)
+                path = ps->items[(size_t) inst->preset_index.load()].path;
             else
                 path = preset_file_for(unique_preset_name("Untitled"));
         } else {
             return;
         }
         if (path.empty()) return;
-        write_preset_file(path, inst->state_buf);
-        scan_user_presets(inst);
-        select_preset_by_path(inst, path);
+        /* file I/O belongs off the audio callback */
+        std::string blob = inst->state_buf;
+        inst->loader.post([inst, path, blob] {
+            write_preset_file(path, blob.c_str());
+            scan_user_presets(inst);
+            select_preset_by_path(inst, path);
+        });
         return;
     }
 
     if (!strcmp(k, "preset_name")) {
         /* rename the CURRENT user preset = rename its file */
-        if (inst->preset_index < inst->factory_count) return;
-        auto &cur = inst->presets[(size_t) inst->preset_index];
+        auto ps = inst->presetList();
+        if (inst->preset_index.load() < ps->factory_count) return;
+        const auto &cur = ps->items[(size_t) inst->preset_index.load()];
         std::string want = sanitize_preset_name(val);
         if (want == cur.name) return;
-        std::string newPath = preset_file_for(unique_preset_name(want));
-        write_preset_file(newPath, cur.blob.c_str());
-        ::remove(cur.path.c_str());
-        scan_user_presets(inst);
-        select_preset_by_path(inst, newPath);
+        std::string blob = cur.blob, oldPath = cur.path;
+        inst->loader.post([inst, want, blob, oldPath] {
+            std::string newPath = preset_file_for(unique_preset_name(want));
+            write_preset_file(newPath, blob.c_str());
+            ::remove(oldPath.c_str());
+            scan_user_presets(inst);
+            select_preset_by_path(inst, newPath);
+        });
         return;
     }
 
@@ -601,25 +664,32 @@ static void tb_set_param(void *instance, const char *key, const char *val)
      * index for these, so the host learns WIRE_INDEX and never sends a
      * name. Nothing here touches the filesystem. */
     if (!strcmp(k, "wt_pack")) {
+        auto snap = inst->selection();
         int n = atoi(val);
         if (n < 0) n = 0;
-        if (n >= (int) inst->packs.size()) n = (int) inst->packs.size() - 1;
-        if (n == inst->wt_pack) return;
-        inst->wt_pack = n;
+        if (n >= (int) snap->packs.size()) n = (int) snap->packs.size() - 1;
+        if (n == inst->wt_pack.load(std::memory_order_relaxed)) return;
+        inst->wt_pack.store(n, std::memory_order_relaxed);
         /* Republish: wt1_select / wt2_select now have different options.
          * The host re-reads the contract after an items selection settles
          * (page_controller commitItem -> armContractSettle), which is why
          * the pack is offered as an items level and not as a plain enum
-         * knob -- a plain enum commit does NOT arm the re-read. */
-        tb_rebuild_filtered(inst);
-        tb_rebuild_chain_params(inst);
+         * knob -- a plain enum commit does NOT arm the re-read.
+         *
+         * The rebuild itself is ~24 KB of formatting: it goes to the worker,
+         * because THIS is the SPI callback. The host waits 500 ms and then
+         * wants two agreeing reads (CONTRACT_SETTLE_MS), and is_loading below
+         * holds it off meanwhile, so the snapshot is always long since
+         * published by the time anyone reads it. */
+        inst->loader.post([inst] { tb_publish_selection(inst); });
         return;
     }
     if (!strcmp(k, "wt1_select") || !strcmp(k, "wt2_select")) {
         int osc = (k[2] == '2') ? 1 : 0;
+        auto snap = inst->selection();
         int n = atoi(val);
-        if (n < 0 || n >= (int) inst->filtered.size()) return;
-        set_table_index(inst, osc, inst->filtered[(size_t) n]);
+        if (n < 0 || n >= (int) snap->filtered.size()) return;
+        set_table_index(inst, osc, snap->filtered[(size_t) n]);
         return;
     }
 
@@ -679,37 +749,40 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     /* Static string: a copy, nothing more. get_param is serviced from the
      * SPI callback (chain_internal.h) — anything that formats or reads the
      * filesystem here jams the param bus. */
-    if (!strcmp(key, "chain_params"))
+    if (!strcmp(key, "chain_params")) {
+        auto snap = inst->selection();
         return write_str(buf, buf_len,
-                         inst->chain_params_cache.empty()
-                             ? tb_chain_params_json
-                             : inst->chain_params_cache.c_str());
+                         snap->chain_params.empty() ? tb_chain_params_json
+                                                    : snap->chain_params.c_str());
+    }
 
     /* Turnable wavetable selection. All three are answered from memory --
      * no scan, no allocation beyond the small formatting buffer. */
     if (!strcmp(key, "wt_pack")) {
         char tmp[16];
-        snprintf(tmp, sizeof tmp, "%d", inst->wt_pack);
+        snprintf(tmp, sizeof tmp, "%d", inst->wt_pack.load(std::memory_order_relaxed));
         return write_str(buf, buf_len, tmp);
     }
     if (!strcmp(key, "wt_pack_list")) {
-        std::string out = "[";
-        for (size_t i = 0; i < inst->packs.size(); i++) {
-            char head[32];
-            snprintf(head, sizeof head, "%s{\"index\":%d,\"label\":\"", i ? "," : "", (int) i);
-            out += head;
-            tb_json_append(out, inst->packs[i]);
-            out += "\"}";
-        }
-        out += "]";
-        return write_str(buf, buf_len, out.c_str());
+        auto snap = inst->selection();
+        return write_str(buf, buf_len,
+                         snap->pack_list.empty() ? "[]" : snap->pack_list.c_str());
     }
     if (!strcmp(key, "wt1_select") || !strcmp(key, "wt2_select")) {
+        auto snap = inst->selection();
         char tmp[16];
         snprintf(tmp, sizeof tmp, "%d",
-                 tb_select_index(inst, key[2] == '2' ? 1 : 0));
+                 tb_select_index(*snap, inst->wt_path[key[2] == '2' ? 1 : 0]));
         return write_str(buf, buf_len, tmp);
     }
+
+    /* The host asks this while a contract re-read is pending and holds off
+     * for as long as it says "1" (page_controller isLoadingSays). Ours is
+     * true while the worker still owes a scan, a table or a republish. */
+    if (!strcmp(key, "is_loading"))
+        return write_str(buf, buf_len,
+                         (!inst->ready.load(std::memory_order_relaxed) ||
+                          inst->loader.busy()) ? "1" : "0");
 
     /* Schwung 0.12+: the stock hierarchy editor (viz graphics, preset
      * browser, file browser, keyboard) IS Tablor's on-device UI. */
@@ -718,37 +791,47 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     /* Shadow UI preset browser convention: preset_count / preset /
      * preset_name (the "No presets" screen reads exactly these). */
+    /* "1" while the worker still owes us file work (used by tests and by
+     * anything that wants to read back a save it just asked for) */
+    if (!strcmp(key, "busy"))
+        return write_str(buf, buf_len, inst->loader.busy() ? "1" : "0");
+
+    if (!strcmp(key, "ready"))
+        return write_str(buf, buf_len,
+                         inst->ready.load(std::memory_order_relaxed) ? "1" : "0");
+
     if (!strcmp(key, "preset_count")) {
         char tmp[16];
-        snprintf(tmp, sizeof tmp, "%d", (int) inst->presets.size());
+        snprintf(tmp, sizeof tmp, "%d", (int) inst->presetList()->items.size());
         return write_str(buf, buf_len, tmp);
     }
     if (!strcmp(key, "preset_factory_count")) {
         char tmp[16];
-        snprintf(tmp, sizeof tmp, "%d", inst->factory_count);
+        snprintf(tmp, sizeof tmp, "%d", inst->presetList()->factory_count);
         return write_str(buf, buf_len, tmp);
     }
     if (!strcmp(key, "preset")) {
         char tmp[16];
-        snprintf(tmp, sizeof tmp, "%d", inst->preset_index);
+        snprintf(tmp, sizeof tmp, "%d", inst->preset_index.load());
         return write_str(buf, buf_len, tmp);
     }
     if (!strcmp(key, "preset_name")) {
-        if (inst->preset_index < 0 ||
-            inst->preset_index >= (int) inst->presets.size())
+        auto ps = inst->presetList();
+        int pi = inst->preset_index.load();
+        if (pi < 0 || pi >= (int) ps->items.size())
             return write_str(buf, buf_len, "");
-        return write_str(buf, buf_len,
-                         inst->presets[(size_t) inst->preset_index].name.c_str());
+        return write_str(buf, buf_len, ps->items[(size_t) pi].name.c_str());
     }
     if (!strcmp(key, "preset_names")) {
         /* JSON array — Movy's buildPresetParam convention, also used by
          * ui_chain's list overlay and the web panel. */
         int o = 0;
         buf[o++] = '[';
-        for (size_t i = 0; i < inst->presets.size() && o < buf_len - 8; i++) {
+        auto ps = inst->presetList();
+        for (size_t i = 0; i < ps->items.size() && o < buf_len - 8; i++) {
             if (i) buf[o++] = ',';
             buf[o++] = '"';
-            for (const char *s = inst->presets[i].name.c_str();
+            for (const char *s = ps->items[i].name.c_str();
                  *s && o < buf_len - 8; s++) {
                 if (*s == '"' || *s == '\\') buf[o++] = '\\';
                 buf[o++] = *s;
@@ -797,7 +880,7 @@ static void tb_on_midi(void *instance, const uint8_t *msg, int len, int /*source
 static void tb_render_block(void *instance, int16_t *out_lr, int frames)
 {
     auto *inst = (tablor_instance *) instance;
-    if (!inst) {
+    if (!inst || !inst->ready.load(std::memory_order_relaxed)) {
         memset(out_lr, 0, (size_t) frames * 2 * sizeof(int16_t));
         return;
     }
@@ -819,19 +902,40 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
     if (module_dir)
         snprintf(inst->module_dir, sizeof inst->module_dir, "%s", module_dir);
 
-    tb::WtScanner::seedUserFolder(inst->module_dir);
-    inst->scanner.scan();
-    /* Derive the pack list and the published option lists ONCE, here,
-     * off the single scan -- so get_param never has to. */
-    tb_refresh_selection_contract(inst);
-    load_presets(inst);
-
-    if (g_host && g_host->log) {
-        char msg[128];
-        snprintf(msg, sizeof msg, "tablor: v" TB_VERSION ", %d wavetables found",
-                 (int) inst->scanner.list().size());
-        g_host->log(msg);
-    }
+    /* create_instance runs on the SPI callback too (MODULES.md, "Threading:
+     * there is no control thread"). Everything below is file I/O, a directory
+     * walk, a ~20 MB first-run copy and an FFT — none of which may happen
+     * here. Start the worker and let it do all of it; the engine renders
+     * silence until the Init table is published. */
+    inst->loader.start();
+    inst->loader.post([inst] {
+        tb::WtScanner::seedUserFolder(inst->module_dir);   /* first-run copy */
+        inst->scanner.scan();                              /* opendir walk   */
+        /* Derive the pack list and the published option lists ONCE, off the
+         * single scan — so get_param never has to. */
+        tb_publish_selection(inst);
+        load_presets(inst);                                /* fopen + scan   */
+        inst->engine.setTable(0, tb::makeInitTable());     /* FFT + ~13 MB   */
+        inst->engine.setTable(1, tb::makeInitTable());
+        /* a state restore may have landed while we were scanning: re-apply
+         * whatever paths it stored, now that the list and loader are live */
+        for (int osc = 0; osc < TB_WT_SLOTS; osc++)
+            if (inst->wt_path[osc][0]) {
+                char keep[512];
+                snprintf(keep, sizeof keep, "%s", inst->wt_path[osc]);
+                set_table_path(inst, osc, keep);
+            }
+        inst->ready = true;
+        if (g_host && g_host->log) {
+            char msg[160];
+            snprintf(msg, sizeof msg,
+                     "tablor: v" TB_VERSION " ready, %d wavetables, %d packs, %d presets",
+                     (int) inst->scanner.list().size(),
+                     (int) inst->selection()->packs.size(),
+                     (int) inst->presetList()->items.size());
+            g_host->log(msg);
+        }
+    });
     return inst;
 }
 

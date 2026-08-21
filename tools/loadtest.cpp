@@ -30,6 +30,19 @@ static int g_fail = 0;
 
 static void host_log(const char *msg) { printf("  [host log] %s\n", msg); }
 
+/* Preset writes are queued to the worker (file I/O may not happen on the
+ * SPI callback), so a test that reads straight back has to let it land. */
+static void settle(plugin_api_v2_t *api, void *inst)
+{
+    char b[8] = {};
+    struct timespec ts = { 0, 5 * 1000000 };
+    for (int i = 0; i < 400; i++) {
+        api->get_param(inst, "busy", b, sizeof b);
+        if (b[0] == '0') return;
+        nanosleep(&ts, nullptr);
+    }
+}
+
 int main(int argc, char **argv)
 {
     const char *so_path = (argc > 1) ? argv[1] : "./dsp.so";
@@ -55,6 +68,22 @@ int main(int argc, char **argv)
     void *inst = api->create_instance(".", nullptr);
     CHECK(inst != nullptr, "create_instance");
     if (!inst) return 1;
+
+    /* create_instance runs on the SPI callback, so it must NOT scan, read
+     * files or build tables inline — it hands all that to the worker. Wait
+     * for the worker instead of assuming it already happened. */
+    {
+        char rb[8] = {};
+        struct timespec ts10 = { 0, 10 * 1000000 };
+        int waited = 0;
+        for (; waited < 1500; waited++) {
+            api->get_param(inst, "ready", rb, sizeof rb);
+            if (rb[0] == '1') break;
+            nanosleep(&ts10, nullptr);
+        }
+        CHECK(rb[0] == '1', "worker finished init off the audio thread (%d ms)",
+              waited * 10);
+    }
 
     static char big[64 * 1024];
 
@@ -304,12 +333,14 @@ int main(int argc, char **argv)
      * the file, recall round-trips, overwrite targets by index */
     api->set_param(inst, "flt_freq", "42");
     api->set_param(inst, "save_preset", "new");
+    settle(api, inst);
     api->get_param(inst, "preset_name", buf, sizeof buf);
     CHECK(!strncmp(buf, "Untitled", 8), "save new -> \"%s\"", buf);
     api->get_param(inst, "preset_count", buf, sizeof buf);
     CHECK(atoi(buf) == nPresets + 1, "preset_count grew to %s", buf);
 
     api->set_param(inst, "preset_name", "LOADTEST SOUND");
+    settle(api, inst);
     api->get_param(inst, "preset_name", buf, sizeof buf);
     CHECK(!strcmp(buf, "LOADTEST SOUND"), "rename (file move) -> \"%s\"", buf);
     {
@@ -335,6 +366,7 @@ int main(int argc, char **argv)
     snprintf(cmd, sizeof cmd, "user:%d", userIdx);
     api->set_param(inst, "flt_res", "99");
     api->set_param(inst, "save_preset", cmd);
+    settle(api, inst);
     api->set_param(inst, "flt_res", "0");
     api->set_param(inst, "preset", "LOADTEST SOUND");
     api->get_param(inst, "flt_res", buf, sizeof buf);
