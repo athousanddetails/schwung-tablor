@@ -56,9 +56,13 @@ disagree:
 
 1. **The stock Shadow UI** (Schwung ≥ 0.12): knob pages with *declared* `viz`
    graphics — envelopes, filter curve, LFO shapes, faders, switches — plus the
-   native full-screen preset browser, wavetable file browser with live
-   preview, and on-screen keyboard for preset renames. 21 graphics declared,
+   native full-screen preset browser, the wavetable file browser (bracketed
+   cell: touch the pot and click the jog, with live preview while you browse),
+   and the on-screen keyboard for preset renames. 21 graphics declared,
    validated by Schwung's own `validate_contract` (zero guesses).
+
+   Page order: `[Presets] › Main › Unison › Shape › Filter › Env › Env+ ›
+   LFO 1 › LFO 2 › Mod 1-2 › Mod 3-4 › Global › User › U.Map`.
 2. **[Movy](https://github.com/DimaDake/schwung-movy)**: the same pages as
    Movy banks, with live filter curves, dual envelope graphics and LFO
    previews.
@@ -77,6 +81,14 @@ is specific to the author's setup. The build runs the native DSP test suite
 and a config contract check; a red test fails the build. `tools/gen_params.py`
 is the single source of truth for the whole parameter surface — module.json,
 Movy config, the on-device editor and the web panel are all generated from it.
+
+## Notes for Schwung upstream
+
+[`docs/UPSTREAM-NOTES.md`](docs/UPSTREAM-NOTES.md) collects what this port ran
+into in the 0.12 parameter pages — the SPI-callback cost of a dynamic
+`chain_params`, the `sample` graphic being a placeholder rather than the
+file's waveform, and two page-ordering traps — each with the file and line it
+comes from, and a suggestion.
 
 ## Credits & licenses
 
