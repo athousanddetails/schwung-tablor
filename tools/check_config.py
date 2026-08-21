@@ -134,10 +134,15 @@ if m3:
         fails.append(f"ui_hierarchy invalid JSON: {e}")
         hier = {"levels": {}}
     levels = hier.get("levels", {})
-    check("root" in levels and "presets" in levels, "root + presets levels exist")
-    pl = levels.get("presets", {})
-    check(pl.get("list_param") == "preset" and pl.get("count_param") == "preset_count"
-          and pl.get("name_param") == "preset_name", "presets level is a browser")
+    check("root" in levels, "root level exists")
+    # The preset browser lives on ROOT (obxd pattern): that puts [Presets]
+    # BEFORE Main in jog order, so a jog off Main goes to the sections
+    # instead of straight back into the preset list.
+    rl = levels.get("root", {})
+    check(rl.get("list_param") == "preset" and rl.get("count_param") == "preset_count"
+          and rl.get("name_param") == "preset_name", "root declares the preset browser")
+    check(not any(l.get("list_param") for k, l in levels.items() if k != "root"),
+          "no second preset browser level (would add a stray Presets page)")
     nav, hkeys = set(), set()
     for lid, lv in levels.items():
         for it in lv.get("params", []):

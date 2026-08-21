@@ -418,26 +418,10 @@ def build_hierarchy():
     rows = {(name, i): r for name, _, rws in BANKS for i, r in enumerate(rws)}
     levels = {}
 
-    # Preset BROWSER level — the native full-screen list, and NOTHING else.
-    # A level that also declares knobs produces a second page ("Presets - 2")
-    # right after the browser, so jogging off the browser lands on another
-    # preset page and reads as being stuck. Rename lives here as a params-only
-    # entry (a `string` param: opens the stock keyboard; the DSP renames the
-    # preset's file); Save Preset is a knob on the Global page.
-    levels["presets"] = {
-        "name": "Presets",
-        "list_param": "preset",
-        "count_param": "preset_count",
-        "name_param": "preset_name",
-        "params": [
-            {"key": "preset_name", "name": "Rename", "type": "string"},
-        ],
-    }
-
     level_ids = []
     for bank, ri, title in PAGE_MAP:
         if bank == "Preset":
-            continue                      # replaced by the browser level
+            continue                      # the browser lives on root (below)
         if (bank, ri) == ("Osc", 0):
             continue                      # root IS the OSC headline page
         lid = title.lower().replace(" ", "").replace(".", "").replace("-", "")
@@ -449,14 +433,29 @@ def build_hierarchy():
         }
         level_ids.append((lid, levels[lid]["name"]))
 
-    # Root: the OSC headline knobs + navigation. Presets first.
+    # ROOT declares the preset browser AND the OSC knobs — the obxd pattern
+    # the planner is built for ("a level is routinely both the Main knob page
+    # and the preset browser"). That yields, in jog order:
+    #
+    #     [Presets] > Main > Unison > Shape > Filter > ...
+    #
+    # so you land on the browser, pick a sound, and every jog from Main goes
+    # forward through the SECTIONS. A separate presets level put the browser
+    # *between* Main and the sections instead, which meant one jog off Main
+    # dropped you straight back into the preset list.
+    #
+    # Rename is a params-only `string` entry (opens the stock keyboard; the
+    # DSP renames the preset's file). Save Preset is a knob on Global.
     osc_row = rows[("Osc", 0)]
-    root_params = [{"level": "presets", "label": "Presets"}]
-    root_params += [hier_param(s) for s in osc_row if s]
+    root_params = [hier_param(s) for s in osc_row if s]
+    root_params.append({"key": "preset_name", "name": "Rename", "type": "string"})
     for lid, label in level_ids:
         root_params.append({"level": lid, "label": label})
     levels["root"] = {
         "name": "Tablor",
+        "list_param": "preset",
+        "count_param": "preset_count",
+        "name_param": "preset_name",
         "params": root_params,
         "knobs": [s["key"] for s in osc_row if s],
     }
