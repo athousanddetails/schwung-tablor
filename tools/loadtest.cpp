@@ -209,10 +209,11 @@ int main(int argc, char **argv)
           strstr(big, "\"kind\":\"fader\""),
           "chain_params declares viz groups");
 
-    /* ---- wt_files: the file list ui_chain.js steps through ---- */
+    /* wt_files is gone: it did a full readdir, and get_param is serviced
+     * from the SPI callback (no I/O allowed there). The wavetable list now
+     * reaches the UI through the cached chain_params instead. */
     n = api->get_param(inst, "wt_files", big, sizeof big);
-    CHECK(n > 100 && strstr(big, "Adventure Kid/") && strstr(big, ".wt2048\n"),
-          "wt_files lists user-folder tables (%d bytes)", n);
+    CHECK(n < 0, "wt_files retired (no readdir on the audio thread)");
 
     /* ---- filepath selection + mid-note switching ---- */
     n = api->get_param(inst, "chain_params", big, sizeof big);
