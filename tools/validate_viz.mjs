@@ -17,7 +17,12 @@ if (!fs.existsSync(mod)) {
 const { validateContract } = await import(mod);
 const hdr = fs.readFileSync(path.join(HERE, "../src/dsp/params.h"), "utf8");
 const un = s => s.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-const chain = JSON.parse(un(hdr.match(/tb_chain_params_json =\n    "(.*)";/)[1]));
+let chainRaw = un(hdr.match(/tb_chain_params_(?:json|fmt) =\n    "(.*)";/)[1]);
+/* the wavetable lists are spliced in at runtime — stand in a realistic scan */
+for (const sub of ['["Init","Adventure Kid/AKWP 0001"]', '"Init"',
+                   '["Init","Adventure Kid/AKWP 0001"]', '"Init"'])
+    chainRaw = chainRaw.replace("%s", sub);
+const chain = JSON.parse(chainRaw);
 const hier  = JSON.parse(un(hdr.match(/tb_ui_hierarchy_json =\n    "(.*)";/)[1]));
 const r = validateContract({ id: "tablor", hierarchy: hier, chainParams: chain });
 let bad = 0;
