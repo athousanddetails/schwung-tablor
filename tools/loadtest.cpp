@@ -244,8 +244,57 @@ int main(int argc, char **argv)
     CHECK(n > 1000 && strstr(big, "\"filepath\"") &&
           strstr(big, "/data/UserData/UserLibrary/Wavetables"),
           "chain_params exposes the filepath browser (%d bytes)", n);
-    CHECK(n < 20000, "chain_params stays small/static (%d bytes) — it is served "
-          "from the SPI callback", n);
+    /* The host reads this into a SHADOW_PARAM_VALUE_LEN (64 KB) buffer and
+     * REFUSES to load the synth if it does not fit (chain_host.c:481). The
+     * dynamic option lists live in here now, so watch the headroom. */
+    CHECK(n < 60000, "chain_params fits the host's 64 KB buffer (%d bytes)", n);
+
+    /* ---- turnable selection: pack list + per-osc enum ---- */
+    CHECK(strstr(big, "\"wt_pack\"") && strstr(big, "\"wt1_select\"") &&
+          strstr(big, "\"wt2_select\""),
+          "chain_params publishes the turnable selection enums");
+
+    n = api->get_param(inst, "wt_pack_list", big, sizeof big);
+    CHECK(n > 10 && big[0] == '[' && strstr(big, "\"label\":\"All\""),
+          "wt_pack_list serves the items rows (%d bytes)", n);
+
+    /* is_loading must answer exactly "1" or "0": anything else and the host
+     * marks it unsupported FOREVER for this component (isLoadingSays). */
+    api->get_param(inst, "is_loading", buf, sizeof buf);
+    CHECK((buf[0] == '0' || buf[0] == '1') && buf[1] == 0,
+          "is_loading answers \"%s\" (must be exactly 1 or 0)", buf);
+
+    /* a pot turn on wt1_select must actually change the loaded table */
+    api->set_param(inst, "wt1_select", "0");
+    api->get_param(inst, "wt1_select", buf, sizeof buf);
+    CHECK(!strcmp(buf, "0"), "wt1_select index 0 = Init -> \"%s\"", buf);
+    api->set_param(inst, "wt1_select", "3");
+    settle(api, inst);
+    api->get_param(inst, "wt1_select", buf, sizeof buf);
+    CHECK(!strcmp(buf, "3"), "wt1_select round-trips an index -> \"%s\"", buf);
+    api->get_param(inst, "wt1_table", buf, sizeof buf);
+    CHECK(buf[0] == '/', "turning wt1_select loaded a real file -> \"%s\"", buf);
+
+    /* choosing a pack republishes wt1_select's options — off the audio
+     * thread, so the test has to wait for the worker like the host waits
+     * for is_loading */
+    int allOpts = 0;
+    api->get_param(inst, "chain_params", big, sizeof big);
+    for (const char *c = strstr(big, "\"wt1_select\""); c && *c && *c != ']'; c++)
+        if (*c == ',') allOpts++;
+    api->set_param(inst, "wt_pack", "1");
+    settle(api, inst);
+    api->get_param(inst, "wt_pack", buf, sizeof buf);
+    CHECK(!strcmp(buf, "1"), "wt_pack round-trips -> \"%s\"", buf);
+    n = api->get_param(inst, "chain_params", big, sizeof big);
+    int packOpts = 0;
+    for (const char *c = strstr(big, "\"wt1_select\""); c && *c && *c != ']'; c++)
+        if (*c == ',') packOpts++;
+    CHECK(packOpts > 0 && packOpts < allOpts,
+          "picking a pack narrows wt1_select (%d -> %d options)",
+          allOpts, packOpts);
+    api->set_param(inst, "wt_pack", "0");
+    settle(api, inst);
 
     #define WTDIR "/data/UserData/UserLibrary/Wavetables/"
     api->set_param(inst, "wt1_table", WTDIR "Adventure Kid/AKWP 0001.wt2048");
