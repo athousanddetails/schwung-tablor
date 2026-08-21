@@ -455,7 +455,38 @@ def build_hierarchy():
     # Rename is a params-only `string` entry (opens the stock keyboard; the
     # DSP renames the preset's file). Save Preset is a knob on Global.
     osc_row = rows[("Osc", 0)]
-    root_params = [hier_param(s) for s in osc_row if s]
+
+    # The wavetable pickers are the two knobs users reach for first, and they
+    # were the two that could not move. The note at the top of this file
+    # already says why -- "it HAS to be an enum, the stock UI cannot TURN a
+    # filepath" -- but hier_param() emits filepath, so the intent never
+    # reached the contract. Reported by a tester as "I want to change
+    # wavetables with the pots... right now it's not possible".
+    #
+    # So the KNOB drives an enum (wt1_select / wt2_select), whose options the
+    # DSP publishes at runtime from the scanner. The file browser is not lost:
+    # its filepath entry stays in params[] as "WT1 File", one row down.
+    file_keys = [s["key"] for s in osc_row if s and s["type"] == "file"]
+    sel_of    = {k: k.split("_")[0] + "_select" for k in file_keys}
+
+    root_params = []
+    for s in osc_row:
+        if not s:
+            continue
+        if s["type"] == "file":
+            # Turnable first; options come from get_param("chain_params").
+            root_params.append({"key": sel_of[s["key"]],
+                                "name": s["full"] + " Table", "type": "enum"})
+        else:
+            root_params.append(hier_param(s))
+    # The pack chooser, then the browsers it scopes.
+    root_params.append({"level": "wtpack", "label": "WT Pack"})
+    for s in osc_row:
+        if s and s["type"] == "file":
+            d = hier_param(s)
+            d["name"] = s["full"] + " File"
+            root_params.append(d)
+
     root_params.append({"key": "preset_name", "name": "Rename", "type": "string"})
     for lid, label in level_ids:
         root_params.append({"level": lid, "label": label})
@@ -465,7 +496,20 @@ def build_hierarchy():
         "count_param": "preset_count",
         "name_param": "preset_name",
         "params": root_params,
-        "knobs": [s["key"] for s in osc_row if s],
+        "knobs": [sel_of.get(s["key"], s["key"]) for s in osc_row if s],
+    }
+
+    # An ITEMS level, deliberately not an enum knob. The host re-reads a
+    # component's contract after an items selection settles (page_controller
+    # commitItem -> armContractSettle); a plain enum commit does NOT arm that
+    # re-read, so as a knob the pack would change and wt1_select's options
+    # would never refresh.
+    levels["wtpack"] = {
+        "name": "WT Pack",
+        "label": "WT Pack",
+        "items_param": "wt_pack_list",
+        "select_param": "wt_pack",
+        "navigate_to": "root",
     }
     return {"levels": levels}
 
