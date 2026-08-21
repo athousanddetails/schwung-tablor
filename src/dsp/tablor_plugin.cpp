@@ -38,7 +38,9 @@ struct tablor_instance {
     char  module_dir[512] = {};
 
     /* wavetable selection = absolute file paths ("" = built-in Init) */
-    char  wt_path[TB_PATH_COUNT][512] = {};
+    char  wt_path[TB_WT_SLOTS][512] = {};
+    char  chain_buf[128 * 1024];      /* chain_params assembly */
+    char  opts_buf[96 * 1024];        /* the wavetable name list */
 
     /* presets: factory (from the module) + UNLIMITED user .tblr files in
      * the user library (filename = preset name, content = TBLR1 blob) */
@@ -221,13 +223,24 @@ static int param_index(const char *key)
     return -1;
 }
 
-/* Which path slot a TB_PATH param uses: wt1_table -> 0, wt2_table -> 1. */
+/* Which wavetable slot a param drives: wt1_table -> 0, wt2_table -> 1. */
 static int tb_path_slot(int param_idx)
 {
     return param_idx == TB_P_WT1_TABLE ? 0 : 1;
 }
 
 /* Store a path and post the background load. "" or "Init" = built-in. */
+/* The scanner list IS the enum: index 0 = "Init" (built-in), then every
+ * file found. Keep the param's index and the loaded path in step. */
+static void sync_table_index(tablor_instance *inst, int osc)
+{
+    const auto &l = inst->scanner.list();
+    int idx = 0;
+    for (size_t i = 0; i < l.size(); i++)
+        if (l[i].path == inst->wt_path[osc]) { idx = (int) i; break; }
+    inst->params()[osc == 0 ? TB_P_WT1_TABLE : TB_P_WT2_TABLE] = (float) idx;
+}
+
 static void set_table_path(tablor_instance *inst, int osc, const char *path)
 {
     if (!strcmp(path, "Init")) path = "";
@@ -241,6 +254,15 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path)
             e.flacFrameSize = fs;
     }
     inst->loader.requestLoad(osc, e);
+    sync_table_index(inst, osc);
+}
+
+/* Select by enum index into the live scan. */
+static void set_table_index(tablor_instance *inst, int osc, int idx)
+{
+    const auto &l = inst->scanner.list();
+    if (idx < 0 || idx >= (int) l.size()) return;
+    set_table_path(inst, osc, l[(size_t) idx].path.c_str());
 }
 
 static float clamp_param(const tb_param_t *p, float v)
@@ -255,7 +277,7 @@ static void build_state_blob(tablor_instance *inst)
 {
     int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
     for (int i = 0; i < TB_PARAM_COUNT; i++) {
-        if (tb_params[i].type == TB_PATH) {
+        if (tb_params[i].n_options == -1) {   /* wavetable: store the path */
             const char *path = inst->wt_path[tb_path_slot(i)];
             if (path[0])
                 o += snprintf(inst->state_buf + o,
@@ -278,7 +300,7 @@ static void build_state_blob(tablor_instance *inst)
 static void reset_to_defaults(tablor_instance *inst)
 {
     for (int i = 0; i < TB_PARAM_COUNT; i++)
-        if (tb_params[i].type != TB_PATH)
+        if (tb_params[i].n_options != -1)
             inst->params()[i] = tb_params[i].def;
     set_table_path(inst, 0, "");
     set_table_path(inst, 1, "");
@@ -304,7 +326,7 @@ static void apply_state_blob(tablor_instance *inst, const char *val)
             memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
             int idx = param_index(kbuf);
             if (idx >= 0) {
-                if (tb_params[idx].type == TB_PATH)
+                if (tb_params[idx].n_options == -1)   /* wavetable path */
                     set_table_path(inst, tb_path_slot(idx), vbuf);
                 else
                     inst->params()[idx] = clamp_param(&tb_params[idx],
@@ -438,8 +460,15 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     if (idx < 0) return;
     const tb_param_t *p = &tb_params[idx];
 
-    if (p->type == TB_PATH) {
-        set_table_path(inst, tb_path_slot(idx), val);
+    if (p->n_options == -1) {                 /* wavetable: live list */
+        int osc = tb_path_slot(idx);
+        if (val[0] == '/') { set_table_path(inst, osc, val); return; }
+        const auto &l = inst->scanner.list();
+        for (size_t i = 0; i < l.size(); i++)          /* by NAME */
+            if (l[i].name == val) { set_table_index(inst, osc, (int) i); return; }
+        char *end = nullptr;
+        long n = strtol(val, &end, 10);                /* by INDEX */
+        if (end != val) set_table_index(inst, osc, (int) n);
         return;
     }
 
@@ -487,8 +516,37 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     auto *inst = (tablor_instance *) instance;
     if (!inst || !key || !buf || buf_len <= 1) return -1;
 
-    if (!strcmp(key, "chain_params"))
-        return write_str(buf, buf_len, tb_chain_params_json);
+    if (!strcmp(key, "chain_params")) {
+        /* Splice the live wavetable scan into the two enum option slots so
+         * the UI can turn through exactly what is on disk right now. */
+        const auto &l = inst->scanner.list();
+        char *opts = inst->opts_buf;
+        const size_t cap = sizeof inst->opts_buf;
+        size_t o = 0;
+        opts[o++] = '[';
+        for (size_t i = 0; i < l.size() && o < cap - 8; i++) {
+            if (i) opts[o++] = ',';
+            opts[o++] = '"';
+            for (const char *c = l[i].name.c_str(); *c && o < cap - 8; c++) {
+                if (*c == '"' || *c == '\\') opts[o++] = '\\';
+                opts[o++] = *c;
+            }
+            opts[o++] = '"';
+        }
+        opts[o++] = ']'; opts[o] = 0;
+
+        char def[2][320];
+        for (int n = 0; n < 2; n++) {
+            int i = (int) inst->params()[n == 0 ? TB_P_WT1_TABLE : TB_P_WT2_TABLE];
+            snprintf(def[n], sizeof def[n], "\"%s\"",
+                     (i >= 0 && i < (int) l.size()) ? l[(size_t) i].name.c_str()
+                                                    : "Init");
+        }
+        int len = snprintf(inst->chain_buf, sizeof inst->chain_buf,
+                           tb_chain_params_fmt, opts, def[0], opts, def[1]);
+        if (len < 0 || len >= (int) sizeof inst->chain_buf) return -1;
+        return write_str(buf, buf_len, inst->chain_buf);
+    }
 
     /* Schwung 0.12+: the stock hierarchy editor (viz graphics, preset
      * browser, file browser, keyboard) IS Tablor's on-device UI. */
@@ -566,8 +624,13 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (idx < 0) return -1;
     const tb_param_t *p = &tb_params[idx];
 
-    if (p->type == TB_PATH)
-        return write_str(buf, buf_len, inst->wt_path[tb_path_slot(idx)]);
+    if (p->n_options == -1) {
+        const auto &l = inst->scanner.list();
+        int i = (int) inst->params()[idx];
+        return write_str(buf, buf_len,
+                         (i >= 0 && i < (int) l.size()) ? l[(size_t) i].name.c_str()
+                                                        : "Init");
+    }
 
     if (p->type == TB_ENUM) {
         const char *name = p->options[(int) inst->params()[idx]];

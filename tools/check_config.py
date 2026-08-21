@@ -24,7 +24,7 @@ for b in banks:
     check(len(b.get("rows", [])) == 1,
           f"bank {b.get('name')}: must be single-row (Movy bank == page)")
 
-VALID_TYPES  = {"float", "int", "enum", "file"}
+VALID_TYPES  = {"float", "int", "enum"}
 VALID_ENV    = {"a", "d", "s", "r"}
 VALID_LFO    = {"shape", "phase", "mode", "retrig", "rate", "depth", "deform"}
 VALID_FILTER = {"cutoff", "resonance", "mode", "slope"}
@@ -48,11 +48,6 @@ for b in banks:
             if s["type"] == "enum":
                 check(isinstance(s.get("options"), list) and s["options"],
                       f"{k}: enum needs options")
-            elif s["type"] == "file":
-                check(isinstance(s.get("fileRoot"), str) and s["fileRoot"].startswith("/"),
-                      f"{k}: file slot needs absolute fileRoot")
-                check(isinstance(s.get("fileFilter"), list) and s["fileFilter"],
-                      f"{k}: file slot needs fileFilter")
             else:
                 check("min" in s and "max" in s and s["min"] < s["max"],
                       f"{k}: needs min < max")
@@ -62,10 +57,14 @@ for b in banks:
 
 # ---- chain_params: static JSON, parse + cross-check -------------------
 hdr = (ROOT / "src/dsp/params.h").read_text()
-m = re.search(r'tb_chain_params_json =\n    "(.*)";', hdr)
+m = re.search(r'tb_chain_params_fmt =\n    "(.*)";', hdr)
 check(m is not None, "chain_params found in params.h")
 if m:
     raw = m.group(1).replace('\\"', '"').replace("\\\\", "\\")
+    # splice a realistic live scan into the 4 dynamic slots, as the DSP does
+    opts = json.dumps(["Init", "Adventure Kid/AKWP 0001", 'Odd "quoted" name'])
+    for sub in (opts, '"Init"', opts, '"Init"'):
+        raw = raw.replace("%s", sub, 1)
     try:
         chain = json.loads(raw)
     except json.JSONDecodeError as e:
@@ -81,19 +80,19 @@ if m:
 
     # types agree (movy 'file' pairs with schwung 'filepath')
     chain_types = {p["key"]: p["type"] for p in chain}
-    pair = {"file": "filepath", "int": "int", "float": "float", "enum": "enum"}
+    pair = {"int": "int", "float": "float", "enum": "enum"}
     for b in banks:
         for r in b["rows"]:
             for s in r:
                 if s and s["key"] in chain_types:
                     check(pair.get(s["type"]) == chain_types[s["key"]],
                           f"{s['key']}: movy type {s['type']} != chain {chain_types[s['key']]}")
-    # filepath entries carry the browser config
+    # the wavetable knobs must be TURNABLE — an opaque kind (filepath/
+    # string/canvas) is swallowed by the stock UI's onKnobTurn
     for p in chain:
-        if p["type"] == "filepath":
-            check(p.get("root", "").startswith("/") and p.get("filter") and
-                  p.get("live_preview") is True,
-                  f"{p['key']}: filepath needs root/filter/live_preview")
+        if p["key"] in ("wt1_table", "wt2_table"):
+            check(p["type"] == "enum" and isinstance(p.get("options"), list),
+                  f"{p['key']}: must be a turnable enum, got {p['type']}")
 
 # ---- ui_pages.json (ui_chain.js data): parses, full key coverage ------
 pages_file = ROOT / "src/ui_pages.json"

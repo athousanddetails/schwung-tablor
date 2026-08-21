@@ -37,14 +37,19 @@ MOD_DST = ["None",
            "Filter Freq", "Filter Res", "Sub Level", "Noise Level", "Amp",
            "LFO1 Rate", "LFO2 Rate"]
 
-# Wavetable selection is a FILEPATH param: Schwung's Shadow UI opens its real
-# file browser (folders + live preview while the cursor moves), Movy opens its
-# own via type 'file'. No giant flat enum, no dynamic options machinery.
+# Wavetable selection is a DYNAMIC ENUM: the options are whatever the scanner
+# finds, served live from get_param("chain_params"). It has to be an enum —
+# the stock UI cannot TURN a filepath/string/canvas param (param_meta.mjs:
+# KIND_OPAQUE, isTurnable), it only opens them on click. An enum turns to the
+# next wavetable, opens a full-screen list on click, and puts the full name in
+# the header. Names come through without their extension.
 WT_ROOT   = "/data/UserData/UserLibrary/Wavetables"
 WT_FILTER = [".wav", ".wt2048", ".wt1024", ".wt512", ".wt256"]
 
 def wtfile(key, short, full):
-    return dict(key=key, short=short, full=full, type="file", default="")
+    """Dynamic enum: options=None means 'the DSP splices the live list in'."""
+    return dict(key=key, short=short, full=full, type="enum",
+                options=None, default=0)
 
 # ---------------------------------------------------------------- helpers
 def pot(key, short, full, default=64):
@@ -70,7 +75,7 @@ def hint(p, **kw):
 # old defaults in the DSP.
 def osc(n):
     return dict(
-        table  = wtfile(f"wt{n}_table", f"TBL{n}", f"WT{n} Table"),
+        table  = wtfile(f"wt{n}_table", f"WT{n}", f"WT{n}"),
         pos    = pot(f"wt{n}_pos",     f"POS{n}",  f"WT{n} Pos", 0),
         level  = pot(f"wt{n}_level",   f"LVL{n}",  f"WT{n} Level", 100 if n == 1 else 0),
         tune   = num(f"wt{n}_tune",    f"TUN{n}",  f"WT{n} Tune", -24, 24, 0),
@@ -252,11 +257,9 @@ def movy_slot(p):
     if p is None:
         return None
     s = {"key": p["key"], "short": p["short"], "full": p["full"], "type": p["type"]}
-    if p["type"] == "file":
-        s["fileRoot"] = WT_ROOT
-        s["fileFilter"] = WT_FILTER
-    elif p["type"] == "enum":
-        s["options"] = p["options"]
+    if p["type"] == "enum":
+        # movy re-reads live options from chain_params; placeholder for the file
+        s["options"] = p["options"] if p["options"] is not None else ["Init"]
     else:
         s["min"], s["max"] = p["min"], p["max"]
     if p.get("automatable") is False:
@@ -319,8 +322,6 @@ VIZ = {
     "noise_level": {"kind": "fader"},
     "volume": {"kind": "fader"},
     "legato": {"kind": "switch"},
-    "wt1_table": {"kind": "sample"},
-    "wt2_table": {"kind": "sample"},
     "save_preset": {"kind": "switch"},
     "m1_on": {"kind": "switch"}, "m2_on": {"kind": "switch"},
     "m3_on": {"kind": "switch"}, "m4_on": {"kind": "switch"},
@@ -333,10 +334,9 @@ for n in (1, 2):
     VIZ[f"lfo{n}_sync"]  = {"kind": "switch"}
 
 def chain_param(p):
-    if p["type"] == "file":
-        d = {"key": p["key"], "name": p["full"], "type": "filepath",
-             "root": WT_ROOT, "start_path": WT_ROOT,
-             "filter": WT_FILTER, "live_preview": True, "default": ""}
+    if p["type"] == "enum" and p["options"] is None:      # dynamic wavetable list
+        d = {"key": p["key"], "name": p["full"], "type": "enum",
+             "options": "%DYNAMIC%", "default": "%DYNDEF%"}
     elif p["type"] == "enum":
         d = {"key": p["key"], "name": p["full"], "type": "enum",
              "options": p["options"], "default": p["options"][p["default"]]}
@@ -349,7 +349,10 @@ def chain_param(p):
 
 chain = [chain_param(p) for p in PARAMS]
 chain_json = json.dumps(chain, separators=(",", ":"))
-assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"
+# Splice points for the live wavetable lists (wt1 options+default, wt2 same).
+chain_json = chain_json.replace('"%DYNAMIC%"', "%s").replace('"%DYNDEF%"', "%s")
+assert chain_json.count("%s") == 4, f"expected 4 dynamic slots, got {chain_json.count('%s')}"
+assert "%DYN" not in chain_json
 
 # ---------------------------------------------------------------- emit: ui_pages.json
 # Data for Tablor's OWN Shadow UI (ui_chain.js) — the 9W9 treatment: jog flips
@@ -378,7 +381,9 @@ def page_slot(p):
         return None
     d = {"k": p["key"], "n": p["short"], "full": p["full"], "t": p["type"]}
     if p["type"] == "enum":
-        d["options"] = p["options"]
+        d["options"] = p["options"] if p["options"] is not None else ["Init"]
+        if p["options"] is None:
+            d["dynamic"] = True
     elif p["type"] == "int":
         d["min"], d["max"] = p["min"], p["max"]
     if p.get("behavior"):
@@ -405,9 +410,8 @@ ui_pages = build_pages()
 # params. Tablor no longer ships its own editor — this hierarchy IS the UI.
 def hier_param(p):
     d = {"key": p["key"], "name": p["full"]}
-    if p["type"] == "file":
-        d.update(type="filepath", root=WT_ROOT, start_path=WT_ROOT,
-                 filter=WT_FILTER, live_preview=True)
+    if p["type"] == "enum" and p["options"] is None:
+        d.update(type="enum")            # options come from chain_params (live)
     elif p["type"] == "enum":
         d.update(type="enum", options=p["options"])
     else:
@@ -499,7 +503,7 @@ lines = [
     f'#define TB_VERSION "{VERSION}"',
     f"#define TB_PARAM_COUNT {len(PARAMS)}",
     "",
-    "typedef enum { TB_INT = 0, TB_ENUM = 1, TB_PATH = 2 } tb_param_type_t;",
+    "typedef enum { TB_INT = 0, TB_ENUM = 1 } tb_param_type_t;",
     "",
     "typedef struct {",
     "    const char *key;",
@@ -509,9 +513,9 @@ lines = [
     "    const char *const *options;       /* NULL for non-enums             */",
     "} tb_param_t;",
     "",
-    "/* TB_PATH params (wavetable files) store a string, not a float — the",
-    " * plugin keeps them in a side table indexed by tb_path_slot(). */",
-    "#define TB_PATH_COUNT 2",
+    "/* Wavetable enums (n_options == -1) take their options from the live",
+    " * scan; the plugin maps index <-> file path. */",
+    "#define TB_WT_SLOTS 2",
     "",
 ]
 enum_names = []
@@ -533,8 +537,8 @@ lines += opt_tables + [""]
 
 rows = []
 for p in PARAMS:
-    if p["type"] == "file":
-        rows.append(f'    {{ "{p["key"]}", TB_PATH, 0, 0, 0, 0, 0 }},')
+    if p["type"] == "enum" and p["options"] is None:
+        rows.append(f'    {{ "{p["key"]}", TB_ENUM, 0, 0, 0, -1, 0 }},')
     elif p["type"] == "enum":
         tbl = opt_index[tuple(p["options"])]
         rows.append(f'    {{ "{p["key"]}", TB_ENUM, 0, {len(p["options"]) - 1}, '
@@ -544,9 +548,9 @@ for p in PARAMS:
 lines += ["static const tb_param_t tb_params[TB_PARAM_COUNT] = {"] + rows + ["};", ""]
 
 lines += [
-    "/* chain_params JSON — fully static, served verbatim (wavetable selection",
-    " * is a filepath param; the file browser lists the folder live). */",
-    f'static const char *tb_chain_params_json =\n    "{c_escape(chain_json)}";',
+    "/* chain_params TEMPLATE. Four %s slots: wt1 options, wt1 default,",
+    " * wt2 options, wt2 default — filled from the live wavetable scan. */",
+    f'static const char *tb_chain_params_fmt =\n    "{c_escape(chain_json)}";',
     "",
     "/* ui_hierarchy for the STOCK Shadow UI (Schwung 0.12+): knob pages",
     " * with declared viz graphics, native preset browser, file browser,",
