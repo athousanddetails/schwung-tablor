@@ -3,8 +3,9 @@
 **A super-simple 2-oscillator wavetable synth for [Schwung](https://github.com/charlesvestal/schwung) on the Ableton Move.**
 
 Tablor is built around one idea: switching wavetables should be the fastest,
-most fun thing on the box. Turn an encoder — hear the next table. Everything
-else stays out of your way.
+most fun thing on the box. Touch the WT knob, click the jog, and browse your
+folder with the sound following the cursor. Everything else stays out of the
+way.
 
 ![13 pages, 93 controls, zero menus-inside-menus]()
 
@@ -45,8 +46,9 @@ packs are seeded on first run:
   Ekstrand
 - **Neu KatalYst** — 50 tables, free ("use them in all your synths")
 
-Selection is a real file browser on-device (with live preview while you
-browse), or encoder-stepping directly from the OSC page.
+Selection is the stock Schwung file browser on-device: the WT1 / WT2 cells
+are bracketed, so touching the pot and clicking the jog opens the folder —
+live preview means you hear each table as the cursor passes it.
 
 ## The interface
 
