@@ -21,6 +21,7 @@ add_library(tablor SHARED
     src/dsp/tablor_plugin.cpp
     src/dsp/engine.cpp
     src/dsp/wt/loader.cpp
+    src/dsp/trace.cpp
     src/ported/wavetable.cpp
     src/ported/audiofilter/ParametricCreator.cpp)
 target_include_directories(tablor PRIVATE src src/dsp src/host src/ported)
@@ -60,6 +61,13 @@ target_link_libraries(tablor_enginebench PRIVATE m)
 target_link_options(tablor_enginebench PRIVATE ${TB_STATIC_LINK})
 
 # Wavetable switch probe (run on the Move).
+# -DTB_TRACE=ON builds a dsp.so that spills a note/voice event trace.
+# Off by default: the shipping build must carry no tracing at all.
+option(TB_TRACE "Build with the audio-thread event trace" OFF)
+if(TB_TRACE)
+    target_compile_definitions(tablor PRIVATE TB_TRACE)
+endif()
+
 add_executable(tablor_stucknote tools/stucknote.cpp)
 target_include_directories(tablor_stucknote PRIVATE src src/host)
 target_link_libraries(tablor_stucknote PRIVATE dl m)

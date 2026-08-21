@@ -25,6 +25,7 @@
 #include "params.h"
 #include "engine.h"
 #include "wt/scanner.h"
+#include "trace.h"
 #include "wt/loader.h"
 
 static const host_api_v1_t *g_host = nullptr;
@@ -294,6 +295,7 @@ static void sync_table_index(tablor_instance *inst, int osc)
 
 static void set_table_path(tablor_instance *inst, int osc, const char *path)
 {
+    tbT(tb::EV_TABLE, osc, path && path[0] ? 1 : 0);
     if (!strcmp(path, "Init")) path = "";
     snprintf(inst->wt_path[osc], sizeof inst->wt_path[osc], "%s", path);
 
@@ -720,6 +722,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     }
 
     inst->params()[idx] = clamp_param(p, v);
+    tbT(tb::EV_PARAM, idx, (int) (inst->params()[idx] * 10));
 
     /* keep the engine's mod-slot cache in step (cheap: 32 reads) */
     if (k[0] == 'm' && k[1] >= '1' && k[1] <= '8')
@@ -870,11 +873,15 @@ static int tb_get_error(void *, char *, int) { return 0; }
 /* MIDI + audio                                                        */
 /* ------------------------------------------------------------------ */
 
-static void tb_on_midi(void *instance, const uint8_t *msg, int len, int /*source*/)
+static void tb_on_midi(void *instance, const uint8_t *msg, int len, int source)
 {
     auto *inst = (tablor_instance *) instance;
-    if (inst && msg)
-        inst->engine.onMidi(msg, len);
+    if (!inst || !msg) return;
+    /* RAW, at the boundary and before any interpretation: this is what tells
+     * a note-off the host never sent from one this module swallowed. */
+    tbT(tb::EV_MIDI, len > 0 ? msg[0] : -1, len > 1 ? msg[1] : -1,
+        len > 2 ? msg[2] : -1, (len & 0xff) | (source << 8));
+    inst->engine.onMidi(msg, len);
 }
 
 static void tb_render_block(void *instance, int16_t *out_lr, int frames)
@@ -908,6 +915,17 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
      * here. Start the worker and let it do all of it; the engine renders
      * silence until the Init table is published. */
     inst->loader.start();
+#ifdef TB_TRACE
+    /* Appended, not truncated: a slot reload after the bug shows up must not
+     * wipe the evidence. Written by the worker, never the audio thread. */
+    inst->loader.post([] {
+        if (FILE *f = fopen(tb::WtLoader::kTracePath, "a")) {
+            fprintf(f, "\n==== instance created ====\n");
+            fclose(f);
+        }
+        tb::g_traceOn.store(true, std::memory_order_relaxed);
+    });
+#endif
     inst->loader.post([inst] {
         tb::WtScanner::seedUserFolder(inst->module_dir);   /* first-run copy */
         inst->scanner.scan();                              /* opendir walk   */

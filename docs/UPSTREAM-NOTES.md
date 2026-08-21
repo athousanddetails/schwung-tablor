@@ -120,3 +120,59 @@ run both in our build gate now and they have caught real regressions.
 *Tablor: <https://github.com/athousanddetails/schwung-tablor> — module
 sources, plus `tools/check_config.py` and `tools/validate_viz.mjs`, which
 run `validateContract` in the build.*
+
+---
+
+## 4. Stale MIDI_IN events are dispatched twice, which manufactures stuck notes
+
+**Where:** `src/host/shadow_midi.c`, `event_dedup_check_and_record()` (line 121)
+
+**Symptom on hardware:** a pad note keeps sounding after release and only stops
+when another note steals its voice; the pad's LED stays lit too. Rare, and it
+takes playing pads while turning an encoder to provoke.
+
+**What the traces show.** Tablor logged every raw MIDI message at its own
+`on_midi` boundary, and Schwung's `chain_midi_trace_on` logged the same stream
+one layer up. For the stuck pitch both agree:
+
+    chain IN  note-ON  91 29:  14      -> synth ON:  14
+    chain IN  note-OFF 81 29:  13      -> synth OFF: 13
+
+The chain host forwarded exactly what it received, so nothing below it lost the
+event. One note-on had no note-off — and the unpaired note-on is a DUPLICATE,
+not a real press:
+
+    214378.54  midi_in  81 26 00     note-off for 38
+    214378.59  midi_in  91 26 7f     note-on  for 38   <- 50 us later
+    213757.25  midi_in  91 26 7f     ...the original press, 621 ms earlier
+
+Two events 50 microseconds apart are one scan of MIDI_IN, not two fingers.
+
+**Root cause.** `shadow_dispatch_direct_external_midi()` walks MIDI_IN every
+frame and relies on the 8-byte dedup key to avoid re-dispatching an event that
+is still sitting in the buffer. That entry expires after
+`EVENT_DEDUP_MAX_AGE_TICKS` (16), and the tick advances once per SPI frame
+(`schwung_shim.c:5401`), so the window is ~46 ms. But how long an event stays
+in MIDI_IN is Move's firmware's business, not ours -- measured at 621 ms here.
+Once the entry expires the still-present event is dispatched a second time. A
+re-dispatched note-ON is a voice that no note-off will ever reach.
+
+**Fix (one line):** refresh the entry's tick whenever it matches, so the window
+starts when the event LEAVES MIDI_IN rather than when it was first seen. This
+cannot suppress a different event: the key carries the XMOS per-event
+timestamp, so a genuine retrigger of the same pitch has a different key and
+still dispatches. Ageing only reclaims ring slots.
+
+    if (memcmp(ring[i].key, key, 8) == 0) {
+        ring[i].tick = g_dispatched_ext_tick;   /* still present: keep alive */
+        return 1;
+    }
+
+Prepared as a branch: `fix/midi-in-stale-event-redispatch`.
+
+**Tablor's backstop.** Until the host fix lands, Tablor releases a note whose
+pad pressure reached zero and then went silent for 1.5 s
+(`Engine::kPadGoneBlocks`). It is armed only by real poly aftertouch, so a MIDI
+keyboard is unaffected. 1.5 s rather than the 400 ms tried first: Move sends a
+stray zero mid-press, measured arriving 800 ms before the real note-off, and a
+short window cut notes that were still held.

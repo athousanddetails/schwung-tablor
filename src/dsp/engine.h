@@ -53,6 +53,31 @@ private:
     int  monoStack[kStackMax];
     int  monoStackLen = 0;
 
+    int  snapCounter = 0;                 /* TB_TRACE: voice snapshot pacing */
+
+    /* ---- lost-note-off safety net ------------------------------------
+     * Move's pads stream poly aftertouch (0xA0) for every held pad, about
+     * every 29 ms, and it decays to 0 as the finger lifts. Traced on the
+     * device, a note-off sometimes never arrives at all while pads are
+     * played and an encoder is turned -- the note-on and the whole
+     * aftertouch decay are delivered, the note-off simply is not, and the
+     * voice sings on until something steals it.
+     *
+     * So a note whose pad pressure reached zero and then went SILENT is a
+     * finger that is gone. Armed only for notes that actually sent poly
+     * aftertouch, so a MIDI keyboard (which sends none) is untouched, and
+     * it needs both zero pressure and a long silence.
+     *
+     * 1.5 s, not the 400 ms tried first: Move sends a stray zero mid-press
+     * (measured on hardware, pressure 0 arriving 800 ms before the real
+     * note-off), so a short window cuts notes that are still held. This is
+     * a backstop for a host bug -- see docs/UPSTREAM-NOTES.md -- and a note
+     * that hangs 1.5 s beats a note that dies under the finger. */
+    static constexpr uint32_t kPadGoneBlocks = 517;   /* ~1.5 s of 2.9 ms blocks */
+    uint32_t blockCount = 0;
+    uint32_t atBlock[128] = {};      /* blockCount when pressure last arrived */
+    uint8_t  atValue[128] = {};      /* that pressure                          */
+    bool     atArmed[128] = {};      /* has this note ever sent poly AT?       */
     float lastPlayedNote = -1.0f;
     uint32_t serialCounter = 0;
 

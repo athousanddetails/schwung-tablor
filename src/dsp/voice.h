@@ -11,6 +11,7 @@
 #pragma once
 
 #include "../ported/wt_oscillator.h"
+#include "trace.h"
 #include "../ported/analog_tables.h"
 #include "../ported/filter.h"
 #include "../ported/adsr.h"
@@ -69,6 +70,7 @@ public:
     int  currentNote() const { return midiNote; }
     uint32_t serialNumber() const { return serial; }
     float envOutput() const { return adsr.getOutput(); }
+    int  adsrState() const { return (int) adsr.getState(); }   /* 0i 1a 2d 3s 4r */
 
     void start(const VoiceContext &c, int note, float vel, uint32_t serial_,
                float glideFromNote)
@@ -221,8 +223,10 @@ public:
             }
         }
 
-        if (adsr.getState() == AnalogADSR::State::idle)
+        if (adsr.getState() == AnalogADSR::State::idle) {
             active = false;
+            tbT(EV_V_IDLE, -1, midiNote);
+        }
 
         for (int i = 0; i < n; i++) {
             outL[i] += postL[i];
