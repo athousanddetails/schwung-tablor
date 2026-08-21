@@ -25,18 +25,7 @@
       "automatable": false,
       "render": "preset"
      },
-     {
-      "key": "save_preset",
-      "short": "SAVE",
-      "full": "Save Preset",
-      "type": "enum",
-      "options": [
-       "Off",
-       "On"
-      ],
-      "automatable": false,
-      "behavior": "trigger"
-     },
+     null,
      null,
      null,
      null,
@@ -993,7 +982,18 @@
       "min": 0,
       "max": 127
      },
-     null
+     {
+      "key": "save_preset",
+      "short": "SAVE",
+      "full": "Save Preset",
+      "type": "enum",
+      "options": [
+       "Off",
+       "On"
+      ],
+      "automatable": false,
+      "behavior": "trigger"
+     }
     ]
    ]
   },

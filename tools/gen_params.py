@@ -172,8 +172,10 @@ def row(*slots):
     return out
 
 BANKS = [
+    # Movy/web keep a Preset page of their own (they have no native browser);
+    # the stock UI uses the hierarchy's browser level instead.
     ("Preset", True, [
-        row(PRESET_PAGE["preset"], PRESET_PAGE["save"]),
+        row(PRESET_PAGE["preset"]),
     ]),
     ("Osc", False, [
         row(O1["table"], O2["table"], O1["pos"], O2["pos"],
@@ -209,7 +211,8 @@ BANKS = [
     ]),
     ("Global", True, [
         row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"], GLOBAL["gmode"],
-            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
+            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"],
+            PRESET_PAGE["save"]),
     ]),
 ]
 
@@ -415,20 +418,20 @@ def build_hierarchy():
     rows = {(name, i): r for name, _, rws in BANKS for i, r in enumerate(rws)}
     levels = {}
 
-    # Dedicated preset BROWSER level (full-screen native list) + save + name.
-    # preset_name is a `string` param: editing opens the stock keyboard and
-    # the DSP renames the current user preset's file.
+    # Preset BROWSER level — the native full-screen list, and NOTHING else.
+    # A level that also declares knobs produces a second page ("Presets - 2")
+    # right after the browser, so jogging off the browser lands on another
+    # preset page and reads as being stuck. Rename lives here as a params-only
+    # entry (a `string` param: opens the stock keyboard; the DSP renames the
+    # preset's file); Save Preset is a knob on the Global page.
     levels["presets"] = {
         "name": "Presets",
         "list_param": "preset",
         "count_param": "preset_count",
         "name_param": "preset_name",
         "params": [
-            {"key": "save_preset", "name": "Save Preset", "type": "enum",
-             "options": ONOFF},
             {"key": "preset_name", "name": "Rename", "type": "string"},
         ],
-        "knobs": ["save_preset"],
     }
 
     level_ids = []
