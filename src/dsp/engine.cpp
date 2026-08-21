@@ -118,20 +118,21 @@ void Engine::noteOff(int note)
         if (!mono) return;
     }
 
-    if (mono) {
-        /* remove from stack */
-        for (int i = 0; i < monoStackLen; i++) {
-            if (monoStack[i] == note) {
-                for (int j = i; j < monoStackLen - 1; j++)
-                    monoStack[j] = monoStack[j + 1];
-                monoStackLen--;
-                break;
-            }
+    /* Drop it from the stack whatever the mode is NOW: the stack can still
+     * hold notes pressed before a mono->poly flip, and a stale entry there
+     * comes back as a phantom retrigger the next time mono is selected. */
+    for (int i = 0; i < monoStackLen; i++) {
+        if (monoStack[i] == note) {
+            for (int j = i; j < monoStackLen - 1; j++)
+                monoStack[j] = monoStack[j + 1];
+            monoStackLen--;
+            break;
         }
-        Voice &v = voices[0];
-        if (!v.isActive()) return;
+    }
 
-        if (v.currentNote() == note) {
+    if (mono) {
+        Voice &v = voices[0];
+        if (v.isActive() && v.currentNote() == note) {
             if (monoStackLen > 0) {
                 /* return to the most recent held note (last-note priority) */
                 auto t1 = std::atomic_load(&table1);
@@ -144,10 +145,21 @@ void Engine::noteOff(int note)
                 sustained[note & 127] = true;
             }
         }
-    } else {
-        for (auto &v : voices)
-            if (v.isActive() && !v.isReleasing() && v.currentNote() == note)
-                v.stop(true);
+    }
+
+    /* Every OTHER voice holding this note is released too, in BOTH modes.
+     *
+     * This used to be the else-arm of the branch above, which made releasing
+     * a note depend on the mode the synth is in when the finger LIFTS rather
+     * than when it landed. Flip Poly -> Mono with a chord held -- one encoder
+     * turn, or any preset recall that selects Mono -- and every note-off went
+     * down the mono arm, which only ever looks at voices[0]. The rest of the
+     * chord never got its note-off and sounded on until something stole the
+     * voice: the "stuck note that clears when I play more notes" report. */
+    for (size_t i = mono ? 1 : 0; i < voices.size(); i++) {
+        Voice &v = voices[i];
+        if (v.isActive() && !v.isReleasing() && v.currentNote() == note)
+            v.stop(true);
     }
 }
 

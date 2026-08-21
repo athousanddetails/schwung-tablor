@@ -60,6 +60,11 @@ target_link_libraries(tablor_enginebench PRIVATE m)
 target_link_options(tablor_enginebench PRIVATE ${TB_STATIC_LINK})
 
 # Wavetable switch probe (run on the Move).
+add_executable(tablor_stucknote tools/stucknote.cpp)
+target_include_directories(tablor_stucknote PRIVATE src src/host)
+target_link_libraries(tablor_stucknote PRIVATE dl m)
+target_link_options(tablor_stucknote PRIVATE ${TB_STATIC_LINK})
+
 add_executable(tablor_wtprobe tools/wtprobe.cpp)
 target_include_directories(tablor_wtprobe PRIVATE src src/host)
 target_link_libraries(tablor_wtprobe PRIVATE dl m)

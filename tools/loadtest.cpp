@@ -341,6 +341,42 @@ int main(int argc, char **argv)
     api->on_midi(inst, all_off, 3, 0);
     api->set_param(inst, "wt1_table", "");
 
+    /* ---- a note-off must release its voice whatever mode we are in NOW ----
+     * Reported from hardware as a note that keeps sounding until you play
+     * more notes (which is voice STEALING, not a release). Flipping to Mono
+     * with a chord held sent every note-off down the mono arm, which only
+     * looks at voices[0]. Regression cover, since one encoder turn or any
+     * preset recall that selects Mono gets you there. */
+    api->set_param(inst, "voice_mode", "Poly");
+    api->set_param(inst, "vca_r", "5");
+    api->set_param(inst, "vca_s", "100");
+    {
+        const int chord[4] = { 55, 59, 62, 67 };
+        for (int i = 0; i < 4; i++) {
+            uint8_t on[3] = { 0x90, (uint8_t) chord[i], 100 };
+            api->on_midi(inst, on, 3, 0);
+        }
+        for (int b = 0; b < 40; b++) api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        api->set_param(inst, "voice_mode", "Mono");          /* mid-chord */
+        for (int i = 0; i < 4; i++) {
+            uint8_t off[3] = { 0x80, (uint8_t) chord[i], 0 };
+            api->on_midi(inst, off, 3, 0);
+        }
+        for (int b = 0; b < 200; b++) api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        long tail = 0;
+        for (int b = 0; b < 400; b++) {
+            api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+            for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
+                long v = out[i] < 0 ? -out[i] : out[i];
+                if (v > tail) tail = v;
+            }
+        }
+        CHECK(tail < 40, "poly chord released after a mid-chord flip to Mono "
+              "(tail peak %ld)", tail);
+        api->set_param(inst, "voice_mode", "Poly");
+        api->on_midi(inst, all_off, 3, 0);
+    }
+
     /* ---- factory presets: count/name served, applying CHANGES params,
      * and switching presets resets what the previous one touched ---- */
     n = api->get_param(inst, "preset_count", buf, sizeof buf);
