@@ -43,18 +43,28 @@
       "key": "wt1_table",
       "short": "WT1",
       "full": "WT1",
-      "type": "enum",
-      "options": [
-       "Init"
+      "type": "file",
+      "fileRoot": "/data/UserData/UserLibrary/Wavetables",
+      "fileFilter": [
+       ".wav",
+       ".wt2048",
+       ".wt1024",
+       ".wt512",
+       ".wt256"
       ]
      },
      {
       "key": "wt2_table",
       "short": "WT2",
       "full": "WT2",
-      "type": "enum",
-      "options": [
-       "Init"
+      "type": "file",
+      "fileRoot": "/data/UserData/UserLibrary/Wavetables",
+      "fileFilter": [
+       ".wav",
+       ".wt2048",
+       ".wt1024",
+       ".wt512",
+       ".wt256"
       ]
      },
      {
@@ -1070,8 +1080,6 @@
       "type": "enum",
       "options": [
        "None",
-       "WT1",
-       "WT2",
        "WT1 Pos",
        "WT2 Pos",
        "WT1 Level",
@@ -1157,8 +1165,6 @@
       "type": "enum",
       "options": [
        "None",
-       "WT1",
-       "WT2",
        "WT1 Pos",
        "WT2 Pos",
        "WT1 Level",
@@ -1244,8 +1250,6 @@
       "type": "enum",
       "options": [
        "None",
-       "WT1",
-       "WT2",
        "WT1 Pos",
        "WT2 Pos",
        "WT1 Level",
@@ -1331,8 +1335,6 @@
       "type": "enum",
       "options": [
        "None",
-       "WT1",
-       "WT2",
        "WT1 Pos",
        "WT2 Pos",
        "WT1 Level",
@@ -1418,8 +1420,6 @@
       "type": "enum",
       "options": [
        "None",
-       "WT1",
-       "WT2",
        "WT1 Pos",
        "WT2 Pos",
        "WT1 Level",
@@ -1505,8 +1505,6 @@
       "type": "enum",
       "options": [
        "None",
-       "WT1",
-       "WT2",
        "WT1 Pos",
        "WT2 Pos",
        "WT1 Level",
@@ -1592,8 +1590,6 @@
       "type": "enum",
       "options": [
        "None",
-       "WT1",
-       "WT2",
        "WT1 Pos",
        "WT2 Pos",
        "WT1 Level",
@@ -1679,8 +1675,6 @@
       "type": "enum",
       "options": [
        "None",
-       "WT1",
-       "WT2",
        "WT1 Pos",
        "WT2 Pos",
        "WT1 Level",

@@ -94,7 +94,7 @@ int main(int argc, char **argv)
 
     /* ---- wavetable enum: default is the built-in Init, index 0 ---- */
     n = api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(n > 0 && !strcmp(buf, "Init"), "wt1_table defaults to \"%s\"", buf);
+    CHECK(n == 0 && buf[0] == 0, "wt1_table default empty (built-in Init)");
 
     /* ---- state round-trip ---- */
     api->set_param(inst, "vca_r", "77");
@@ -209,38 +209,27 @@ int main(int argc, char **argv)
           strstr(big, "\"kind\":\"fader\""),
           "chain_params declares viz groups");
 
-    /* wt_files is gone: it did a full readdir, and get_param is serviced
-     * from the SPI callback (no I/O allowed there). The wavetable list now
-     * reaches the UI through the cached chain_params instead. */
-    n = api->get_param(inst, "wt_files", big, sizeof big);
-    CHECK(n < 0, "wt_files retired (no readdir on the audio thread)");
 
     /* ---- filepath selection + mid-note switching ---- */
     n = api->get_param(inst, "chain_params", big, sizeof big);
-    CHECK(n > 1000 && strstr(big, "Adventure Kid/") && strstr(big, "Neu KatalYst/"),
-          "chain_params carries the live wavetable list (%d bytes)", n);
-    CHECK(!strstr(big, ".wt2048") && !strstr(big, "%s"),
-          "wavetable names carry no extension and no unfilled slots");
+    CHECK(n > 1000 && strstr(big, "\"filepath\"") &&
+          strstr(big, "/data/UserData/UserLibrary/Wavetables"),
+          "chain_params exposes the filepath browser (%d bytes)", n);
+    CHECK(n < 20000, "chain_params stays small/static (%d bytes) — it is served "
+          "from the SPI callback", n);
 
     #define WTDIR "/data/UserData/UserLibrary/Wavetables/"
-    api->set_param(inst, "wt1_table", "Adventure Kid/AKWP 0001");
+    api->set_param(inst, "wt1_table", WTDIR "Adventure Kid/AKWP 0001.wt2048");
     api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Adventure Kid/AKWP 0001"),
-          "wt1 select by NAME (what a knob turn sends) -> \"%s\"", buf);
-    api->set_param(inst, "wt1_table", WTDIR "Adventure Kid/AKWP 0002.wt2048");
-    api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Adventure Kid/AKWP 0002"),
-          "wt1 select by PATH still works -> \"%s\"", buf);
-    api->set_param(inst, "wt1_table", "0");
-    api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Init"), "wt1 select by INDEX -> \"%s\"", buf);
+    CHECK(strstr(buf, "AKWP 0001.wt2048") != nullptr,
+          "wt1 select by path (what the browser writes) -> \"%s\"", buf);
 
     api->on_midi(inst, note_on, 3, 0);
     struct timespec ts = { 0, 50 * 1000000 };
     long swPeak = 0, swMin = 1 << 30;
-    const char *cycle[4] = { "Neu KatalYst/NK - ACTIVE", "Init",
-                             "Adventure Kid/AKWP 0042",
-                             "Neu KatalYst/NK - AGE" };
+    const char *cycle[4] = { WTDIR "Neu KatalYst/NK - ACTIVE.wt2048", "",
+                             WTDIR "Adventure Kid/AKWP 0042.wt2048",
+                             WTDIR "Neu KatalYst/NK - AGE.wt2048" };
     for (int s = 0; s < 4; s++) {                       /* switch WHILE held */
         api->set_param(inst, "wt1_table", cycle[s]);
         for (int b = 0; b < 60; b++) {                  /* ~175 ms per table */
@@ -259,20 +248,20 @@ int main(int argc, char **argv)
           "sound continuous across 4 mid-note table switches (peak %ld, min %ld)",
           swPeak, swMin);
     api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Neu KatalYst/NK - AGE"), "landed on \"%s\"", buf);
+    CHECK(strstr(buf, "NK - AGE.wt2048") != nullptr, "landed on \"%s\"", buf);
 
     /* state stores the table PATH and restores it */
     n = api->get_param(inst, "state", big, sizeof big);
     CHECK(strstr(big, "wt1_table=" WTDIR "Neu KatalYst/NK - AGE.wt2048;") != nullptr,
           "state carries table path");
     memcpy(saved, big, sizeof big);
-    api->set_param(inst, "wt1_table", "Init");
+    api->set_param(inst, "wt1_table", "");
     api->set_param(inst, "synth:state", saved);
     api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Neu KatalYst/NK - AGE"), "state restores the table");
+    CHECK(strstr(buf, "NK - AGE.wt2048") != nullptr, "state restores the table");
 
     api->on_midi(inst, all_off, 3, 0);
-    api->set_param(inst, "wt1_table", "Init");
+    api->set_param(inst, "wt1_table", "");
 
     /* ---- factory presets: count/name served, applying CHANGES params,
      * and switching presets resets what the previous one touched ---- */
@@ -295,7 +284,7 @@ int main(int argc, char **argv)
     api->get_param(inst, "voice_mode", buf, sizeof buf);
     CHECK(!strcmp(buf, "Poly"), "Init preset resets to poly (\"%s\")", buf);
     api->get_param(inst, "wt1_table", buf, sizeof buf);
-    CHECK(!strcmp(buf, "Init"), "Init preset resets table to built-in (\"%s\")", buf);
+    CHECK(buf[0] == 0, "Init preset resets table to built-in");
 
     /* preset audibly plays */
     api->set_param(inst, "preset", "6");                /* Glass Bells */

@@ -39,15 +39,6 @@ struct tablor_instance {
 
     /* wavetable selection = absolute file paths ("" = built-in Init) */
     char  wt_path[TB_WT_SLOTS][512] = {};
-    /* chain_params is served FROM THE SPI CALLBACK (chain_internal.h:
-     * 'no allocation, no I/O — these routes are serviced from the SPI
-     * callback'), so it is built ONCE here and only re-built when the
-     * wavetable list changes. Serving it meant formatting 24 KB from
-     * 116 filenames inside the audio callback: that blew the frame,
-     * jammed the param bus (param_giveup storms) and left the UI
-     * unable to read the enum — so the knob would not turn. */
-    char  chain_buf[128 * 1024];
-    int   chain_len = 0;
 
     /* presets: factory (from the module) + UNLIMITED user .tblr files in
      * the user library (filename = preset name, content = TBLR1 blob) */
@@ -222,41 +213,6 @@ static void load_presets(tablor_instance *inst)
     scan_user_presets(inst);
 }
 
-/* Rebuild the cached chain_params JSON. NEVER call from the audio path. */
-static void rebuild_chain_params(tablor_instance *inst)
-{
-    static char opts[96 * 1024];
-    const auto &l = inst->scanner.list();
-    size_t o = 0;
-    opts[o++] = '[';
-    for (size_t i = 0; i < l.size() && o < sizeof opts - 8; i++) {
-        if (i) opts[o++] = ',';
-        opts[o++] = '"';
-        for (const char *c = l[i].name.c_str(); *c && o < sizeof opts - 8; c++) {
-            if (*c == '"' || *c == '\\') opts[o++] = '\\';
-            opts[o++] = *c;
-        }
-        opts[o++] = '"';
-    }
-    opts[o++] = ']'; opts[o] = 0;
-
-    char def[2][320];
-    for (int n = 0; n < 2; n++) {
-        int i = (int) inst->params()[n == 0 ? TB_P_WT1_TABLE : TB_P_WT2_TABLE];
-        snprintf(def[n], sizeof def[n], "\"%s\"",
-                 (i >= 0 && i < (int) l.size()) ? l[(size_t) i].name.c_str() : "Init");
-    }
-    int len = snprintf(inst->chain_buf, sizeof inst->chain_buf,
-                       tb_chain_params_fmt, opts, def[0], opts, def[1]);
-    inst->chain_len = (len > 0 && len < (int) sizeof inst->chain_buf) ? len : 0;
-    if (g_host && g_host->log) {
-        char m[128];
-        snprintf(m, sizeof m, "tablor: chain_params cached, %d bytes, %d tables",
-                 inst->chain_len, (int) l.size());
-        g_host->log(m);
-    }
-}
-
 static int param_index(const char *key)
 {
     for (int i = 0; i < TB_PARAM_COUNT; i++)
@@ -297,9 +253,6 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path)
     }
     inst->loader.requestLoad(osc, e);
     sync_table_index(inst, osc);
-    /* NO rebuild here: this runs on the audio thread. The cached JSON's
-     * "default" going stale is harmless — the UI reads the live value with
-     * get_param("wt1_table"). */
 }
 
 /* Select by enum index into the live scan. */
@@ -322,7 +275,7 @@ static void build_state_blob(tablor_instance *inst)
 {
     int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
     for (int i = 0; i < TB_PARAM_COUNT; i++) {
-        if (tb_params[i].n_options == -1) {   /* wavetable: store the path */
+        if (tb_params[i].type == TB_PATH) {   /* wavetable: store the path */
             const char *path = inst->wt_path[tb_path_slot(i)];
             if (path[0])
                 o += snprintf(inst->state_buf + o,
@@ -345,7 +298,7 @@ static void build_state_blob(tablor_instance *inst)
 static void reset_to_defaults(tablor_instance *inst)
 {
     for (int i = 0; i < TB_PARAM_COUNT; i++)
-        if (tb_params[i].n_options != -1)
+        if (tb_params[i].type != TB_PATH)
             inst->params()[i] = tb_params[i].def;
     set_table_path(inst, 0, "");
     set_table_path(inst, 1, "");
@@ -371,7 +324,7 @@ static void apply_state_blob(tablor_instance *inst, const char *val)
             memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
             int idx = param_index(kbuf);
             if (idx >= 0) {
-                if (tb_params[idx].n_options == -1)   /* wavetable path */
+                if (tb_params[idx].type == TB_PATH)
                     set_table_path(inst, tb_path_slot(idx), vbuf);
                 else
                     inst->params()[idx] = clamp_param(&tb_params[idx],
@@ -505,15 +458,8 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     if (idx < 0) return;
     const tb_param_t *p = &tb_params[idx];
 
-    if (p->n_options == -1) {                 /* wavetable: live list */
-        int osc = tb_path_slot(idx);
-        if (val[0] == '/') { set_table_path(inst, osc, val); return; }
-        const auto &l = inst->scanner.list();
-        for (size_t i = 0; i < l.size(); i++)          /* by NAME */
-            if (l[i].name == val) { set_table_index(inst, osc, (int) i); return; }
-        char *end = nullptr;
-        long n = strtol(val, &end, 10);                /* by INDEX */
-        if (end != val) set_table_index(inst, osc, (int) n);
+    if (p->type == TB_PATH) {
+        set_table_path(inst, tb_path_slot(idx), val);
         return;
     }
 
@@ -561,11 +507,11 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     auto *inst = (tablor_instance *) instance;
     if (!inst || !key || !buf || buf_len <= 1) return -1;
 
-    if (!strcmp(key, "chain_params")) {
-        /* audio-thread safe: a copy out of the cache, nothing else */
-        if (!inst->chain_len) return -1;
-        return write_str(buf, buf_len, inst->chain_buf);
-    }
+    /* Static string: a copy, nothing more. get_param is serviced from the
+     * SPI callback (chain_internal.h) — anything that formats or reads the
+     * filesystem here jams the param bus. */
+    if (!strcmp(key, "chain_params"))
+        return write_str(buf, buf_len, tb_chain_params_json);
 
     /* Schwung 0.12+: the stock hierarchy editor (viz graphics, preset
      * browser, file browser, keyboard) IS Tablor's on-device UI. */
@@ -625,13 +571,8 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (idx < 0) return -1;
     const tb_param_t *p = &tb_params[idx];
 
-    if (p->n_options == -1) {
-        const auto &l = inst->scanner.list();
-        int i = (int) inst->params()[idx];
-        return write_str(buf, buf_len,
-                         (i >= 0 && i < (int) l.size()) ? l[(size_t) i].name.c_str()
-                                                        : "Init");
-    }
+    if (p->type == TB_PATH)
+        return write_str(buf, buf_len, inst->wt_path[tb_path_slot(idx)]);
 
     if (p->type == TB_ENUM) {
         const char *name = p->options[(int) inst->params()[idx]];
@@ -683,7 +624,6 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
     tb::WtScanner::seedUserFolder(inst->module_dir);
     inst->scanner.scan();
     load_presets(inst);
-    rebuild_chain_params(inst);      /* off the audio path, once */
 
     if (g_host && g_host->log) {
         char msg[128];
