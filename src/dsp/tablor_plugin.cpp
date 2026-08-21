@@ -50,6 +50,25 @@ struct tablor_instance {
     /* state blob scratch */
     char  state_buf[8 * 1024];
 
+    /* ---- Turnable wavetable selection -------------------------------
+     * The filepath control (wt1_table/wt2_table) is OPAQUE to the host:
+     * it can be opened, never turned, because turning a path would write
+     * nonsense into it. So a pot cannot change the wavetable, which is
+     * what was reported.
+     *
+     * These add the turnable half WITHOUT touching the filepath control:
+     * a pack chosen from a list, and one enum per oscillator whose
+     * options are the entries in that pack. An enum is turnable AND
+     * divable, so hold+click opens a scrolling picker for a long pack.
+     *
+     * Rebuilt only when the scan or the pack changes -- NEVER inside
+     * get_param, which runs on the SPI callback (see the note above
+     * tb_chain_params_json). get_param only ever hands out a pointer. */
+    std::vector<std::string> packs;      /* distinct "Pack" prefixes, [0] = All */
+    std::vector<int>         filtered;   /* indices into scanner.list() */
+    int          wt_pack = 0;
+    std::string  chain_params_cache;     /* static head + dynamic options */
+
     float *params() { return engine.pots; }
 };
 
@@ -255,6 +274,130 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path)
     sync_table_index(inst, osc);
 }
 
+/* ------------------------------------------------------------------ */
+/* Pack list + per-pack enum options                                    */
+/*                                                                      */
+/* WtEntry.name is already "Pack/Name" or "Name", so the pack list costs */
+/* no extra filesystem work -- it is a pass over a list we already hold. */
+/* ------------------------------------------------------------------ */
+
+static std::string tb_pack_of(const std::string &name)
+{
+    size_t slash = name.find('/');
+    return slash == std::string::npos ? std::string() : name.substr(0, slash);
+}
+
+static std::string tb_leaf_of(const std::string &name)
+{
+    size_t slash = name.rfind('/');
+    return slash == std::string::npos ? name : name.substr(slash + 1);
+}
+
+/* JSON-escape into a std::string. The option names are filenames, so a
+ * quote or a backslash is unlikely but entirely legal on disk -- and one
+ * unescaped byte turns the whole contract into a failed read. */
+static void tb_json_append(std::string &out, const std::string &in)
+{
+    for (char c : in) {
+        if (c == '"' || c == '\\') { out += '\\'; out += c; }
+        else if ((unsigned char) c < 0x20) continue;
+        else out += c;
+    }
+}
+
+static void tb_rebuild_packs(tablor_instance *inst)
+{
+    inst->packs.clear();
+    inst->packs.push_back("All");
+    for (const auto &e : inst->scanner.list()) {
+        std::string pk = tb_pack_of(e.name);
+        if (pk.empty()) continue;
+        bool seen = false;
+        for (size_t i = 1; i < inst->packs.size(); i++)
+            if (inst->packs[i] == pk) { seen = true; break; }
+        if (!seen) inst->packs.push_back(pk);
+    }
+    if (inst->wt_pack >= (int) inst->packs.size()) inst->wt_pack = 0;
+}
+
+/* The host's chain-host parser caps an enum at MAX_ENUM_OPTIONS (128).
+ * Past that the knob grid still lists them (the JS parses the JSON
+ * itself) but CC knob mapping and modulation targets truncate, which
+ * fails silently -- so stop at the cap rather than publish a list only
+ * half of the host can see. */
+static const size_t TB_MAX_ENUM_OPTIONS = 128;
+
+static void tb_rebuild_filtered(tablor_instance *inst)
+{
+    inst->filtered.clear();
+    const auto &l = inst->scanner.list();
+    const bool all = (inst->wt_pack <= 0);
+    const std::string want = all ? std::string()
+                                 : inst->packs[(size_t) inst->wt_pack];
+    for (size_t i = 0; i < l.size(); i++) {
+        if (i == 0) { inst->filtered.push_back(0); continue; }   /* Init */
+        if (all || tb_pack_of(l[i].name) == want)
+            inst->filtered.push_back((int) i);
+        if (inst->filtered.size() >= TB_MAX_ENUM_OPTIONS) break;
+    }
+}
+
+/* Where the currently loaded table sits in the filtered list, or 0. */
+static int tb_select_index(tablor_instance *inst, int osc)
+{
+    const auto &l = inst->scanner.list();
+    for (size_t i = 0; i < inst->filtered.size(); i++) {
+        int g = inst->filtered[i];
+        if (g >= 0 && g < (int) l.size() && l[(size_t) g].path == inst->wt_path[osc])
+            return (int) i;
+    }
+    return 0;
+}
+
+/* Static head + the three dynamic entries. Built here so get_param can
+ * hand out a pointer and nothing else. */
+static void tb_rebuild_chain_params(tablor_instance *inst)
+{
+    std::string &out = inst->chain_params_cache;
+    out.assign(tb_chain_params_json);
+    if (out.size() < 2 || out.back() != ']') return;   /* not the shape we expect */
+    out.pop_back();                                     /* drop the closing ] */
+
+    const auto &l = inst->scanner.list();
+
+    out += ",{\"key\":\"wt_pack\",\"name\":\"WT Pack\",\"type\":\"enum\",\"options\":[";
+    for (size_t i = 0; i < inst->packs.size(); i++) {
+        if (i) out += ",";
+        out += "\""; tb_json_append(out, inst->packs[i]); out += "\"";
+    }
+    out += "]}";
+
+    for (int osc = 0; osc < 2; osc++) {
+        char head[96];
+        snprintf(head, sizeof head,
+                 ",{\"key\":\"wt%d_select\",\"name\":\"WT%d Table\",\"type\":\"enum\",\"options\":[",
+                 osc + 1, osc + 1);
+        out += head;
+        for (size_t i = 0; i < inst->filtered.size(); i++) {
+            int g = inst->filtered[i];
+            if (i) out += ",";
+            out += "\"";
+            tb_json_append(out, g == 0 ? std::string("Init")
+                                       : tb_leaf_of(l[(size_t) g].name));
+            out += "\"";
+        }
+        out += "]}";
+    }
+    out += "]";
+}
+
+static void tb_refresh_selection_contract(tablor_instance *inst)
+{
+    tb_rebuild_packs(inst);
+    tb_rebuild_filtered(inst);
+    tb_rebuild_chain_params(inst);
+}
+
 /* Select by enum index into the live scan. */
 static void set_table_index(tablor_instance *inst, int osc, int idx)
 {
@@ -454,6 +597,32 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         return;
     }
 
+    /* Turnable wavetable selection. Indices only: get_param reports an
+     * index for these, so the host learns WIRE_INDEX and never sends a
+     * name. Nothing here touches the filesystem. */
+    if (!strcmp(k, "wt_pack")) {
+        int n = atoi(val);
+        if (n < 0) n = 0;
+        if (n >= (int) inst->packs.size()) n = (int) inst->packs.size() - 1;
+        if (n == inst->wt_pack) return;
+        inst->wt_pack = n;
+        /* Republish: wt1_select / wt2_select now have different options.
+         * The host re-reads the contract after an items selection settles
+         * (page_controller commitItem -> armContractSettle), which is why
+         * the pack is offered as an items level and not as a plain enum
+         * knob -- a plain enum commit does NOT arm the re-read. */
+        tb_rebuild_filtered(inst);
+        tb_rebuild_chain_params(inst);
+        return;
+    }
+    if (!strcmp(k, "wt1_select") || !strcmp(k, "wt2_select")) {
+        int osc = (k[2] == '2') ? 1 : 0;
+        int n = atoi(val);
+        if (n < 0 || n >= (int) inst->filtered.size()) return;
+        set_table_index(inst, osc, inst->filtered[(size_t) n]);
+        return;
+    }
+
     int idx = param_index(k);
     if (idx < 0) return;
     const tb_param_t *p = &tb_params[idx];
@@ -511,7 +680,36 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
      * SPI callback (chain_internal.h) — anything that formats or reads the
      * filesystem here jams the param bus. */
     if (!strcmp(key, "chain_params"))
-        return write_str(buf, buf_len, tb_chain_params_json);
+        return write_str(buf, buf_len,
+                         inst->chain_params_cache.empty()
+                             ? tb_chain_params_json
+                             : inst->chain_params_cache.c_str());
+
+    /* Turnable wavetable selection. All three are answered from memory --
+     * no scan, no allocation beyond the small formatting buffer. */
+    if (!strcmp(key, "wt_pack")) {
+        char tmp[16];
+        snprintf(tmp, sizeof tmp, "%d", inst->wt_pack);
+        return write_str(buf, buf_len, tmp);
+    }
+    if (!strcmp(key, "wt_pack_list")) {
+        std::string out = "[";
+        for (size_t i = 0; i < inst->packs.size(); i++) {
+            char head[32];
+            snprintf(head, sizeof head, "%s{\"index\":%d,\"label\":\"", i ? "," : "", (int) i);
+            out += head;
+            tb_json_append(out, inst->packs[i]);
+            out += "\"}";
+        }
+        out += "]";
+        return write_str(buf, buf_len, out.c_str());
+    }
+    if (!strcmp(key, "wt1_select") || !strcmp(key, "wt2_select")) {
+        char tmp[16];
+        snprintf(tmp, sizeof tmp, "%d",
+                 tb_select_index(inst, key[2] == '2' ? 1 : 0));
+        return write_str(buf, buf_len, tmp);
+    }
 
     /* Schwung 0.12+: the stock hierarchy editor (viz graphics, preset
      * browser, file browser, keyboard) IS Tablor's on-device UI. */
@@ -623,6 +821,9 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
 
     tb::WtScanner::seedUserFolder(inst->module_dir);
     inst->scanner.scan();
+    /* Derive the pack list and the published option lists ONCE, here,
+     * off the single scan -- so get_param never has to. */
+    tb_refresh_selection_contract(inst);
     load_presets(inst);
 
     if (g_host && g_host->log) {
