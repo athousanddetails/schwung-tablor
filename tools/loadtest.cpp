@@ -306,7 +306,7 @@ int main(int argc, char **argv)
     struct timespec ts = { 0, 50 * 1000000 };
     long swPeak = 0, swMin = 1 << 30;
     const char *cycle[4] = { WTDIR "Neu KatalYst/NK - ACTIVE.wt2048", "",
-                             WTDIR "Adventure Kid/AKWP 0042.wt2048",
+                             WTDIR "Adventure Kid/AKWP 0003.wt2048",
                              WTDIR "Neu KatalYst/NK - AGE.wt2048" };
     for (int s = 0; s < 4; s++) {                       /* switch WHILE held */
         api->set_param(inst, "wt1_table", cycle[s]);
@@ -340,6 +340,44 @@ int main(int argc, char **argv)
 
     api->on_midi(inst, all_off, 3, 0);
     api->set_param(inst, "wt1_table", "");
+
+    /* ---- the drawable digest of the loaded table ----
+     * A UI that draws a wavetable needs the real samples; this is the only
+     * way they leave the module. Tables are chosen through wt1_select, whose
+     * options ARE the files present, rather than by naming a path: this test
+     * first hardcoded one that does not exist on the device, and passed
+     * anyway because a failed load silently keeps the previous table. */
+    api->set_param(inst, "wt1_select", "0");            /* Init */
+    settle(api, inst);
+    n = api->get_param(inst, "wt1_shape", big, sizeof big);
+    CHECK(n > 100, "wt1_shape serves a digest for the Init table (%d bytes)", n);
+    {
+        int df = 0, ds = 0;
+        int got = sscanf(big, "%d,%d,", &df, &ds);
+        const char *body = strchr(big, ',');
+        if (body) body = strchr(body + 1, ',');
+        int blen = body ? (int) strlen(body + 1) : 0;
+        CHECK(got == 2 && df > 0 && ds > 0 && blen == df * ds,
+              "digest header matches its payload (%d frames x %d = %d chars)",
+              df, ds, blen);
+        memcpy(saved, big, sizeof big);
+
+        api->set_param(inst, "wt1_select", "1");         /* first real file */
+        settle(api, inst);
+        for (int i = 0; i < 200 && !strcmp(big, saved); i++) {
+            struct timespec t5 = { 0, 5 * 1000000 };
+            nanosleep(&t5, nullptr);
+            api->get_param(inst, "wt1_shape", big, sizeof big);
+        }
+        api->get_param(inst, "wt1_table", buf, sizeof buf);
+        CHECK(buf[0] == '/', "wt1_select 1 loaded a real file -> \"%s\"", buf);
+        CHECK(strcmp(big, saved) != 0,
+              "the digest CHANGES when a different table is loaded");
+        api->get_param(inst, "wt2_shape", buf, sizeof buf);
+        CHECK(buf[0] != 0, "wt2_shape is served independently");
+        api->set_param(inst, "wt1_select", "0");
+        settle(api, inst);
+    }
 
     /* ---- a note-off must release its voice whatever mode we are in NOW ----
      * Reported from hardware as a note that keeps sounding until you play

@@ -393,31 +393,71 @@ function drawLfo(shape, depth, offset, phase) {
   };
 }
 
-/* Wavetable waterfall. INDICATIVE, not the file: the module does not publish
- * table data over the remote API, so the frames here are a generated shape
- * that responds to Pos / Bend / Formant. The highlighted line is the frame
- * Pos selects, which is the part that actually tells you something. */
-function drawWaterfall(pos, bend, formant) {
+/* Wavetable waterfall, drawn from the REAL table. wtN_shape is
+ * "<frames>,<samples>,<data>" with one character per sample, quantised to 64
+ * levels over [-1,1] -- built on the module's worker when a table lands, so
+ * asking for it costs a string copy. Until it arrives (or on a module that
+ * does not serve it) nothing is drawn but the frame marker, rather than a
+ * shape that would be a lie about what is loaded. */
+var SHAPE = {};        /* osc -> {frames, samples, data:[Float32Array]} */
+var QI = {};
+(function () {
+  var A = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+  for (var i = 0; i < A.length; i++) QI[A.charAt(i)] = i;
+})();
+
+function parseShape(str) {
+  if (!str) return null;
+  var c1 = str.indexOf(","), c2 = str.indexOf(",", c1 + 1);
+  if (c1 < 0 || c2 < 0) return null;
+  var nf = parseInt(str.substring(0, c1), 10);
+  var ns = parseInt(str.substring(c1 + 1, c2), 10);
+  var body = str.substring(c2 + 1);
+  if (!(nf > 0 && ns > 0) || body.length < nf * ns) return null;
+  var out = [];
+  for (var f = 0; f < nf; f++) {
+    var a = new Float32Array(ns);
+    for (var i = 0; i < ns; i++) {
+      var q = QI[body.charAt(f * ns + i)];
+      a[i] = (q === undefined ? 31 : q) / 63 * 2 - 1;
+    }
+    out.push(a);
+  }
+  return { frames: nf, samples: ns, data: out };
+}
+
+function fetchShape(osc) {
+  if (!schwungRemote.getParam) return;
+  schwungRemote.getParam(K + "wt" + osc + "_shape").then(function (v) {
+    var sh = parseShape(v);
+    if (sh) { SHAPE[osc] = sh; redrawSoon(); }
+  }).catch(function () {});
+}
+
+function drawWaterfall(osc, pos) {
   return function (g, w, h) {
-    var rows = 26, pad = 6;
-    var fp = frac(pos), fb = bend ? frac(bend) * 2 - 1 : 0, ff = formant ? frac(formant) : .5;
-    var cur = Math.round(fp * (rows - 1));
+    var sh = SHAPE[osc];
+    var pad = 6, fp = frac(pos);
+    if (!sh) {
+      g.fillStyle = "#3a3f47"; g.font = "10px system-ui";
+      g.fillText("waiting for table…", pad + 2, h / 2);
+      return;
+    }
+    var rows = sh.frames, cur = Math.round(fp * (rows - 1));
     for (var i = 0; i < rows; i++) {
-      var t = i / (rows - 1);
-      var y = pad + (h - pad * 2) * (0.18 + t * 0.82);
+      var t = i / (rows - 1 || 1);
+      var y = pad + (h - pad * 2) * (0.16 + t * 0.84);
       var xs = pad + (h - pad * 2) * (1 - t) * 0.30;
-      var amp = (h - pad * 2) * 0.18 * (0.45 + t * 0.55);
+      var amp = (h - pad * 2) * 0.17;
+      var d = sh.data[i], n = d.length;
       g.beginPath();
-      for (var x = 0; x <= 64; x++) {
-        var u = x / 64;
-        var harm = 1 + Math.floor(t * 5) + ff * 3;
-        var v = Math.sin(u * 2 * Math.PI * harm + fb * 3 * u) *
-                Math.pow(Math.sin(Math.PI * u), 0.6 + t);
-        var px = xs + (w - pad - xs) * u, py = y - v * amp;
+      for (var x = 0; x < n; x++) {
+        var px = xs + (w - pad - xs) * (x / (n - 1));
+        var py = y - d[x] * amp;
         x ? g.lineTo(px, py) : g.moveTo(px, py);
       }
       if (i === cur) { g.strokeStyle = "#e8e04a"; g.lineWidth = 1.6; }
-      else { g.strokeStyle = "rgba(79,208,106," + (0.13 + t * 0.5).toFixed(2) + ")"; g.lineWidth = 1; }
+      else { g.strokeStyle = "rgba(79,208,106," + (0.12 + t * 0.5).toFixed(2) + ")"; g.lineWidth = 1; }
       g.stroke();
     }
   };
@@ -444,7 +484,7 @@ function buildOsc(n) {
             ["wt" + n + "_bend", "Bend"]], r2);
   var right = el("div", "col", b);
   right.style.flex = "1"; right.style.minWidth = "0";
-  addCanvas(right, drawWaterfall("wt" + n + "_pos", "wt" + n + "_bend", "wt" + n + "_formant"), 104);
+  addCanvas(right, drawWaterfall(n, "wt" + n + "_pos"), 104);
   placed["wt" + n + "_table"] = 1;
   CTL["wt" + n + "_table"] = { set: function (p) {
     var e = document.getElementById("wtname" + n);
@@ -452,6 +492,14 @@ function buildOsc(n) {
     if (!p) { e.textContent = "Init"; return; }
     var s = p.substring(p.lastIndexOf("/") + 1), d = s.lastIndexOf(".");
     e.textContent = d > 0 ? s.substring(0, d) : s;
+  } };
+  /* the module rebuilds the digest on its worker, so re-read a beat after the
+   * path lands rather than racing it */
+  var prevPath = null;
+  var watch = CTL["wt" + n + "_table"].set;
+  CTL["wt" + n + "_table"] = { set: function (p) {
+    watch(p);
+    if (p !== prevPath) { prevPath = p; setTimeout(function () { fetchShape(n); }, 250); }
   } };
 }
 
@@ -587,6 +635,7 @@ function buildPickers(cp) {
 
     ts.addEventListener("change", function () {
       send("wt" + n + "_select", ts.value);
+      setTimeout(function () { fetchShape(n); }, 300);
     });
     ps.addEventListener("change", function () {
       packSels.forEach(function (o) { o.value = ps.value; });
@@ -669,6 +718,7 @@ fetch("ui_pages.json").then(function (r) { return r.json(); }).then(function (d)
   drawAll();
   if (schwungRemote.getChainParams)
     schwungRemote.getChainParams().then(buildPickers).catch(function () {});
+  fetchShape(1); fetchShape(2);
   schwungRemote.onParamChange(function (p) {
     for (var key in p) {
       if (key.indexOf(K) !== 0) continue;

@@ -69,6 +69,12 @@ public:
             worker.join();
     }
 
+    /* Called on the WORKER with each table as it finishes, before the engine
+     * takes ownership. The plugin uses it to build the display digest off the
+     * real samples -- the one place that data is in hand on a thread allowed
+     * to walk it. */
+    std::function<void(int, const Wavetable &)> onTable;
+
     /* UI thread. osc: 0/1. entry: a copy of the scanner row. */
     void requestLoad(int osc, const WtEntry &entry)
     {
@@ -134,8 +140,10 @@ private:
             }
 
             std::shared_ptr<Wavetable> table = load(entry);
-            if (table)
+            if (table) {
+                if (onTable) onTable(osc, *table);
                 engine.setTable(osc, std::move(table));
+            }
 
             {
                 std::lock_guard<std::mutex> lk(m);

@@ -92,6 +92,14 @@ struct tablor_instance {
      * Init table; the audio path renders silence in the meantime */
     std::atomic<bool> ready { false };
 
+    /* A drawable digest of the table each oscillator actually has loaded, so
+     * a UI can show the real waveform instead of a stand-in. Built on the
+     * worker when a table lands and published as an immutable string; the
+     * audio thread only ever hands out the pointer. */
+    std::shared_ptr<const std::string> wt_shape[TB_WT_SLOTS];
+    std::shared_ptr<const std::string> shape(int osc) const
+    { return std::atomic_load(&wt_shape[osc & 1]); }
+
     float *params() { return engine.pots; }
 };
 
@@ -451,6 +459,55 @@ static int tb_select_index(const tablor_instance::SelSnapshot &snap,
     return 0;
 }
 
+/* ---- drawable digest of a loaded wavetable ------------------------------
+ * "<frames>,<samples>,<data>" with one character per sample: the amplitude
+ * quantised to 64 levels over [-1,1] in a base64-ish alphabet. 24 frames of
+ * 64 samples is ~1.5 KB -- enough to draw a waterfall, small enough to sit
+ * in a param string, and cheap enough to build on the worker while the table
+ * is already in cache. WORKER THREAD ONLY. */
+static const char kQ[] =
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+
+static std::string tb_wt_digest(const tb::Wavetable &wt)
+{
+    const int nf = wt.size();
+    if (nf < 1) return std::string();
+    const int OF = nf < 24 ? nf : 24;      /* frames we draw   */
+    const int OS = 64;                     /* samples per frame */
+
+    std::string out;
+    char head[32];
+    snprintf(head, sizeof head, "%d,%d,", OF, OS);
+    out.reserve((size_t) OF * OS + 16);
+    out.assign(head);
+
+    for (int f = 0; f < OF; f++) {
+        int src = (OF == 1) ? 0 : (int) ((long) f * (nf - 1) / (OF - 1));
+        const tb::FrameTable *ft = wt.frame(src);
+        if (!ft || ft->levels.empty()) { out.append(OS, kQ[32]); continue; }
+        const tb::MipLevel &lv = ft->levels[0];   /* full band level */
+        if (lv.size < 1 || lv.data.empty()) { out.append(OS, kQ[32]); continue; }
+        for (int i = 0; i < OS; i++) {
+            int j = (int) ((long) i * lv.size / OS);
+            if (j >= (int) lv.data.size()) j = (int) lv.data.size() - 1;
+            float v = lv.data[(size_t) j];
+            if (v < -1.0f) v = -1.0f;
+            if (v >  1.0f) v =  1.0f;
+            int q = (int) ((v + 1.0f) * 0.5f * 63.0f + 0.5f);
+            if (q < 0) q = 0;
+            if (q > 63) q = 63;
+            out += kQ[q];
+        }
+    }
+    return out;
+}
+
+static void tb_publish_shape(tablor_instance *inst, int osc, const tb::Wavetable &wt)
+{
+    auto s = std::make_shared<const std::string>(tb_wt_digest(wt));
+    std::atomic_store(&inst->wt_shape[osc & 1], s);
+}
+
 /* Select by index into the published snapshot. */
 static void set_table_index(tablor_instance *inst, int osc, int idx)
 {
@@ -776,6 +833,14 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         return write_str(buf, buf_len, tmp);
     }
 
+    /* The table each oscillator has loaded, drawable: "frames,samples,data".
+     * Served from a string the worker built when the table landed -- no walk
+     * of the wavetable here, this is the SPI callback. */
+    if (!strcmp(key, "wt1_shape") || !strcmp(key, "wt2_shape")) {
+        auto sp = inst->shape(key[2] == '2' ? 1 : 0);
+        return write_str(buf, buf_len, sp ? sp->c_str() : "");
+    }
+
     /* The host asks this while a contract re-read is pending and holds off
      * for as long as it says "1" (page_controller isLoadingSays). Ours is
      * true while the worker still owes a scan, a table or a republish. */
@@ -915,7 +980,15 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
          * single scan — so get_param never has to. */
         tb_publish_selection(inst);
         load_presets(inst);                                /* fopen + scan   */
-        inst->engine.setTable(0, tb::makeInitTable());     /* FFT + ~13 MB   */
+        /* The digest is built from the real samples, on this thread, as each
+         * table lands -- including these built-in ones. */
+        inst->loader.onTable = [inst](int osc, const tb::Wavetable &wt) {
+            tb_publish_shape(inst, osc, wt);
+        };
+        auto init0 = tb::makeInitTable();                  /* FFT + ~13 MB */
+        tb_publish_shape(inst, 0, *init0);
+        tb_publish_shape(inst, 1, *init0);
+        inst->engine.setTable(0, init0);
         inst->engine.setTable(1, tb::makeInitTable());
         /* a state restore may have landed while we were scanning: re-apply
          * whatever paths it stored, now that the list and loader are live */
