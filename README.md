@@ -67,35 +67,27 @@ page on a four-cell screen — and the browser's graphic was Schwung's stock
 told you nothing about the table you had loaded. The parameters still exist
 and still save with the patch; they simply have no cell on the hardware.
 
-## The interface
+## Web panel
 
-Tablor speaks the platform's native language — no custom editor code. Three
-ways to play it, all driven by one generated parameter source so they never
-disagree:
+Open `move.local:7700/remote-ui` and Tablor lays itself out the way the plugin
+it came from does: both oscillators across the top with their wavetable
+displays, then noise, sub, filter and the amp envelope, the LFOs and mod
+matrix below, macros and global last. Every control is live in both
+directions — turn a knob here and the Move follows, turn one on the Move and
+this follows.
 
-1. **The stock Shadow UI** (Schwung ≥ 0.12): knob pages with *declared* `viz`
-   graphics — envelopes, filter curve, LFO shapes, faders, switches — plus the
-   native full-screen preset browser, the scrolling wavetable picker on the
-   WT knobs, and the on-screen keyboard for preset renames. 19 graphics
-   declared, validated by Schwung's own `validate_contract` (zero guesses).
+![Web panel](docs/img/web-panel.png)
 
-   Page order: `[Presets] › Main › Unison › Shape › Filter › Env › Env+ ›
-   LFO 1 › LFO 2 › Mod 1-2 › Mod 3-4 › Global › User › U.Map`.
-2. **[Movy](https://github.com/DimaDake/schwung-movy)**: the same pages as
-   Movy banks, with live filter curves, dual envelope graphics and LFO
-   previews.
-3. **Web panel**: every control in the browser, live in both directions, laid
-   out the way the plugin this came from lays out — and it draws the wavetable
-   you actually have loaded.
+The waterfall is your actual wavetable, not a stand-in. The module publishes a
+digest of the table it has loaded, and the panel also reads the file itself
+over the manager's file API and decodes it, so the drawing follows whichever
+table is loaded — changed from the browser here, or from the pot on the Move.
+The bright line is the frame the Pos knob is sitting on. The ADSR and LFO
+curves are computed from the live parameter values, so they are readouts
+rather than decoration.
 
-   ![Web panel](docs/img/web-panel.png)
-
-   The waterfall is the real file: the module publishes a digest of the loaded
-   table, and the panel also reads the file itself over the manager's file API
-   and decodes it, so changing a table — from the browser **or** from the pot
-   on the Move — redraws it. The ADSR and LFO curves are computed from the live
-   parameter values. Wavetable and pack pickers sit in each oscillator's title
-   bar.
+Each oscillator's title bar carries the wavetable picker and a pack filter,
+which is where the file browsing lives now that it is off the hardware pages.
 
 ## Building
 
@@ -110,18 +102,6 @@ is specific to the author's setup. The build runs the native DSP test suite
 and a config contract check; a red test fails the build. `tools/gen_params.py`
 is the single source of truth for the whole parameter surface — module.json,
 Movy config, the on-device editor and the web panel are all generated from it.
-
-## Notes for Schwung upstream
-
-[`docs/UPSTREAM-NOTES.md`](docs/UPSTREAM-NOTES.md) collects what this port ran
-into in the 0.12 parameter pages — the SPI-callback cost of a dynamic
-`chain_params`, the `sample` graphic being a placeholder rather than the
-file's waveform, and two page-ordering traps — each with the file and line it
-comes from, and a suggestion.
-
-A separate hunt, for a pad note-off the host sometimes never delivers, is
-written up with its traces in
-[charlesvestal/schwung#249](https://github.com/charlesvestal/schwung/issues/249).
 
 ## Credits & licenses
 
