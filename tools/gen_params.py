@@ -15,7 +15,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 # ---------------------------------------------------------------- enums
 FILTER_TYPES = ["LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24"]
@@ -123,17 +123,21 @@ VCA = dict(
     # two hinted foursomes then collapse into ONE group and the loser draws
     # as lone ramps. Unhinted, Movy parses the LABELS ("VCA Attack" -> Amp
     # group, "Flt Attack" -> Filter group) and stacks two named envelopes.
-    a = pot("vca_a", "ATK", "VCA Attack", 0),
+    # Defaults are the original's: attack 0.1 s, decay 0.1 s, sustain 80%,
+    # release 0.1 s (PluginProcessor.cpp, both the amp and filter envelopes).
+    # These had been ported as 0 / 100% / 5.7 ms, so a fresh patch had an
+    # instant attack and an abrupt release -- the clicky first impression.
+    a = pot("vca_a", "ATK", "VCA Attack", 51),
     d = pot("vca_d", "DEC", "VCA Decay", 64),
-    s = pot("vca_s", "SUS", "VCA Sustain", 127),
-    r = pot("vca_r", "REL", "VCA Release", 24),
+    s = pot("vca_s", "SUS", "VCA Sustain", 102),
+    r = pot("vca_r", "REL", "VCA Release", 64),
     vel = pot("vca_vel", "VVEL", "VCA Velocity", 100),
 )
 FEG = dict(
-    a = pot("flt_a", "FATK", "Flt Attack", 0),
+    a = pot("flt_a", "FATK", "Flt Attack", 51),
     d = pot("flt_d", "FDEC", "Flt Decay", 64),
-    s = pot("flt_s", "FSUS", "Flt Sustain", 64),
-    r = pot("flt_r", "FREL", "Flt Release", 24),
+    s = pot("flt_s", "FSUS", "Flt Sustain", 102),
+    r = pot("flt_r", "FREL", "Flt Release", 64),
 )
 def lfo(n):
     return dict(
