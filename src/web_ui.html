@@ -64,6 +64,17 @@ input.rename{
   font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:var(--dim);
 }
 .panel > .bar .dot{width:7px; height:7px; border-radius:50%; background:var(--acc-d); flex:none}
+.panel > .bar .pick{
+  margin-left:auto; display:flex; gap:5px; align-items:center; min-width:0;
+}
+.panel > .bar .pick select{
+  appearance:none; -webkit-appearance:none; text-align:center;
+  background:#0d0f12; color:var(--acc); border:1px solid var(--edge);
+  border-radius:10px; padding:2px 8px; font-size:10px; cursor:pointer;
+  max-width:190px; text-overflow:ellipsis;
+}
+.panel > .bar .pick select.pack{color:var(--dim); max-width:100px}
+.panel > .bar .pick select:hover{border-color:var(--acc-d)}
 .panel > .bar .name{
   color:var(--acc); letter-spacing:.12em; text-transform:none; font-size:11px;
   margin-left:auto; max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -531,6 +542,96 @@ function build() {
   }
 }
 
+/* ------------------------------------------------------- wavetable picker */
+/* wt_pack / wt1_select / wt2_select are not in ui_pages.json: the module
+ * builds them into chain_params at runtime, because their options ARE the
+ * files currently on the device. getChainParams() is the only way to see
+ * them, and the lists change whenever the pack does, so the pack commit
+ * re-reads the contract the way the hardware pages do. */
+var packSels = [], tableSels = [];
+
+function fillSelect(sel, options, cur) {
+  sel.textContent = "";
+  options.forEach(function (o, i) {
+    var op = el("option", null, sel); op.value = String(i); op.textContent = o;
+  });
+  if (cur !== undefined && cur !== null) sel.value = String(cur);
+}
+
+function findParam(list, key) {
+  for (var i = 0; i < list.length; i++) if (list[i] && list[i].key === key) return list[i];
+  return null;
+}
+
+function buildPickers(cp) {
+  var pack = findParam(cp, "wt_pack");
+  if (!pack || !pack.options) return false;      /* older module: leave the name */
+
+  [1, 2].forEach(function (n) {
+    var sel = findParam(cp, "wt" + n + "_select");
+    if (!sel || !sel.options) return;
+    var nameEl = document.getElementById("wtname" + n);
+    if (!nameEl) return;
+    var host = el("div", "pick");
+    nameEl.parentNode.replaceChild(host, nameEl);
+
+    var ps = el("select", "pack", host);
+    ps.title = "Wavetable pack — filters the list beside it";
+    fillSelect(ps, pack.options, 0);
+    packSels.push(ps);
+
+    var ts = el("select", null, host);
+    ts.title = "Wavetable for oscillator " + n;
+    fillSelect(ts, sel.options, 0);
+    tableSels.push({ n: n, sel: ts });
+
+    ts.addEventListener("change", function () {
+      send("wt" + n + "_select", ts.value);
+    });
+    ps.addEventListener("change", function () {
+      packSels.forEach(function (o) { o.value = ps.value; });
+      send("wt_pack", ps.value);
+      refreshPickers();                 /* the table lists just changed */
+    });
+
+    CTL["wt" + n + "_select"] = { set: function (v) {
+      var i = ts.options.length ? [].findIndex.call(ts.options, function (o) {
+        return o.textContent === v;
+      }) : -1;
+      if (i < 0) { i = parseInt(v, 10); if (isNaN(i)) return; }
+      ts.value = String(i);
+    } };
+  });
+
+  CTL.wt_pack = { set: function (v) {
+    var i = pack.options.indexOf(v);
+    if (i < 0) { i = parseInt(v, 10); if (isNaN(i)) return; }
+    packSels.forEach(function (o) { o.value = String(i); });
+  } };
+  return true;
+}
+
+/* The module republishes on its worker, so the new lists are not ready the
+ * instant the pack is committed. It serves is_loading for exactly this. */
+function refreshPickers(tries) {
+  tries = tries || 0;
+  schwungRemote.getParam(K + "is_loading").then(function (busy) {
+    if (busy === "1" && tries < 12)
+      return setTimeout(function () { refreshPickers(tries + 1); }, 150);
+    return schwungRemote.getChainParams().then(function (cp) {
+      var pack = findParam(cp, "wt_pack");
+      if (pack && pack.options)
+        packSels.forEach(function (o) {
+          var keep = o.value; fillSelect(o, pack.options, keep);
+        });
+      tableSels.forEach(function (t) {
+        var sel = findParam(cp, "wt" + t.n + "_select");
+        if (sel && sel.options) fillSelect(t.sel, sel.options, t.sel.value);
+      });
+    });
+  }).catch(function () { /* host without these keys: pickers stay as they are */ });
+}
+
 /* ---------------------------------------------------------------- preset */
 function wirePreset() {
   var idx = 0;
@@ -566,6 +667,8 @@ fetch("ui_pages.json").then(function (r) { return r.json(); }).then(function (d)
   build();
   wirePreset();
   drawAll();
+  if (schwungRemote.getChainParams)
+    schwungRemote.getChainParams().then(buildPickers).catch(function () {});
   schwungRemote.onParamChange(function (p) {
     for (var key in p) {
       if (key.indexOf(K) !== 0) continue;
