@@ -441,6 +441,15 @@ static void tb_publish_selection(tablor_instance *inst)
         }
         out += "]}";
     }
+
+    /* The shape digests are DECLARED here so they reach a browser at all:
+     * schwung-manager only streams values for keys chain_params declares
+     * (its standalone getParam answers from that cache and never asks the
+     * device), so an undeclared key reads as undefined forever. min==max
+     * marks them un-turnable; they live in no ui_hierarchy page, so no
+     * knob surface ever shows them -- they exist purely as a data channel. */
+    out += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}"
+           ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}";
     out += "]";
 
     std::atomic_store(&inst->sel,

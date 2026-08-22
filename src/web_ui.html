@@ -426,11 +426,22 @@ function parseShape(str) {
   return { frames: nf, samples: ns, data: out };
 }
 
+/* The digests STREAM: they are declared in chain_params, so the manager
+ * polls their values and pushes them like any other param. getParam is a
+ * cache read in standalone mode -- it cannot ask the device -- so this
+ * only harvests what has already streamed; the CTL entries below are the
+ * real path and keep the display current as tables change. */
+function ingestShape(osc, v) {
+  var sh = parseShape(v);
+  if (sh) { SHAPE[osc] = sh; redrawSoon(); }
+}
+[1, 2].forEach(function (osc) {
+  CTL["wt" + osc + "_shape"] = { set: function (v) { ingestShape(osc, v); } };
+});
 function fetchShape(osc) {
   if (!schwungRemote.getParam) return;
   schwungRemote.getParam(K + "wt" + osc + "_shape").then(function (v) {
-    var sh = parseShape(v);
-    if (sh) { SHAPE[osc] = sh; redrawSoon(); }
+    ingestShape(osc, v);
   }).catch(function () {});
 }
 
