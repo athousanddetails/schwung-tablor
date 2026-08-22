@@ -19,6 +19,8 @@
 #include <dlfcn.h>
 #include <ctime>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <sched.h>
 
 #include "../src/host/plugin_api_v1.h"
 
@@ -65,6 +67,18 @@ int main(int argc, char **argv)
     CHECK(api && api->api_version == 2, "init returns v2 api");
     if (!api) return 1;
 
+    /* Create the instance from a SCHED_FIFO thread, the way Schwung does.
+     * Without this the checks below would pass even with inheritance left on,
+     * because the test's own thread is SCHED_OTHER and there would be nothing
+     * hot to inherit. Needs RLIMIT_RTPRIO or root; if it is refused the
+     * scheduling checks still run but prove less, and say so. */
+    int rt_ok = 0;
+    {
+        struct sched_param rp = { };
+        rp.sched_priority = 90;
+        rt_ok = (sched_setscheduler(0, SCHED_FIFO, &rp) == 0);
+    }
+
     void *inst = api->create_instance(".", nullptr);
     CHECK(inst != nullptr, "create_instance");
     if (!inst) return 1;
@@ -86,6 +100,64 @@ int main(int argc, char **argv)
     }
 
     static char big[64 * 1024];
+
+    /* ---- the worker must not be born on the audio thread's scheduling ----
+     * Every entry point runs on the SPI callback at SCHED_FIFO 90, and POSIX
+     * defaults to PTHREAD_INHERIT_SCHED, so a thread spawned from one takes
+     * that priority AND that name -- invisible in an audit, and starving
+     * Move's own Link publisher (FIFO 35) for the length of a table build.
+     * Raised by Schwung upstream against this module. Asserted here against
+     * /proc so the fix cannot quietly regress. */
+    {
+        int found = 0, policy = -1, rtprio = -1;
+        DIR *d = opendir("/proc/self/task");
+        struct dirent *e;
+        while (d && (e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            char path[256], nm[64] = {};
+            snprintf(path, sizeof path, "/proc/self/task/%s/comm", e->d_name);
+            FILE *f = fopen(path, "r");
+            if (!f) continue;
+            if (fgets(nm, sizeof nm, f)) nm[strcspn(nm, "\n")] = 0;
+            fclose(f);
+            if (strcmp(nm, "tablor-wtload") != 0) continue;
+            found = 1;
+            snprintf(path, sizeof path, "/proc/self/task/%s/stat", e->d_name);
+            f = fopen(path, "r");
+            if (f) {
+                static char st[2048];
+                if (fgets(st, sizeof st, f)) {
+                    /* comm is parenthesised and may contain spaces: fields
+                     * resume after the LAST ')'. rt_priority is 40, policy 41,
+                     * and field 3 is the first token after it. */
+                    char *p2 = strrchr(st, ')');
+                    if (p2) {
+                        int idx = 3;
+                        for (char *tok = strtok(p2 + 2, " "); tok;
+                             tok = strtok(nullptr, " "), idx++) {
+                            if (idx == 40) rtprio = atoi(tok);
+                            if (idx == 41) { policy = atoi(tok); break; }
+                        }
+                    }
+                }
+                fclose(f);
+            }
+            break;
+        }
+        if (d) closedir(d);
+        CHECK(found, "the loader thread is named (tablor-wtload), not left "
+              "wearing the audio thread's name");
+        CHECK(policy == SCHED_OTHER, "loader thread policy is SCHED_OTHER "
+              "(got %d, SCHED_FIFO is %d)", policy, SCHED_FIFO);
+        CHECK(rtprio == 0, "loader thread has no realtime priority (got %d)",
+              rtprio);
+    }
+
+    if (rt_ok) {
+        struct sched_param np = { };
+        np.sched_priority = 0;
+        sched_setscheduler(0, SCHED_OTHER, &np);   /* the rest is not RT */
+    }
 
     /* ---- chain_params ---- */
     int n = api->get_param(inst, "chain_params", big, sizeof big);

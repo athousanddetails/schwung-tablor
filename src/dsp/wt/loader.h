@@ -21,7 +21,6 @@
 #include <condition_variable>
 #include <map>
 #include <mutex>
-#include <thread>
 
 namespace tb {
 
@@ -39,12 +38,13 @@ public:
     explicit WtLoader(Engine &engine_) : engine(engine_) {}
 
     /* Start the worker. Called once from create_instance — which is itself
-     * on the audio callback, so this is the ONE thread we ever spawn. */
+     * on the audio callback, so this is the ONE thread we ever spawn, and it
+     * must not be born with the callback's scheduling (see rt.h). */
     void start()
     {
         std::lock_guard<std::mutex> lk(m);
-        if (!worker.joinable())
-            worker = std::thread([this] { run(); });
+        if (started) return;
+        started = rtStartWorker(&worker, &trampoline, this, "tablor-wtload") == 0;
     }
 
     /* Queue arbitrary off-thread work (file I/O, allocation, scans).
@@ -65,8 +65,8 @@ public:
             quit = true;
         }
         cv.notify_all();
-        if (worker.joinable())
-            worker.join();
+        if (started)
+            pthread_join(worker, nullptr);
     }
 
     /* Called on the WORKER with each table as it finishes, before the engine
@@ -93,12 +93,14 @@ public:
     }
 
 private:
+    static void *trampoline(void *self)
+    {
+        static_cast<WtLoader *>(self)->run();
+        return nullptr;
+    }
+
     void run()
     {
-        /* FIRST: shed the SCHED_FIFO 90 inherited from the audio callback,
-         * or this worker starves Move's own audio. */
-        rtDemoteThisThread();
-
         for (;;) {
             WtEntry entry;
             int osc = -1;
@@ -231,7 +233,8 @@ private:
 
     mutable std::mutex m;
     std::condition_variable cv;
-    std::thread worker;
+    pthread_t worker {};
+    bool started = false;
     WtEntry pending[2];
     std::vector<std::function<void()>> jobs;
     bool hasPending[2] = { false, false };
