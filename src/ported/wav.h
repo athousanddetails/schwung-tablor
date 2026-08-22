@@ -95,18 +95,55 @@ inline bool wavLoad(const char *path, WavData &out)
     return haveFmt && !out.samples.empty();
 }
 
-/* Frame-size inference: clm chunk first, then the 2048->256 divisibility
- * heuristic (the OXI Coral converter's rule). Returns 0 if nothing fits. */
+inline bool wavIsPow2(int v) { return v > 0 && (v & (v - 1)) == 0; }
+
+/* Frame-size inference: clm chunk first, then divisibility, largest first.
+ *
+ * The list used to stop at 256, which quietly excluded every short table.
+ * A single cycle of 128 samples divides by nothing in {2048..256}, so it
+ * inferred nothing and the caller's 2048 fallback made nFrames 0 -- the load
+ * failed and the table was silent. A file whose real cycle is short but whose
+ * LENGTH happens to divide by 2048 was worse: it loaded, with each "frame"
+ * spanning many real cycles, which is the buzz.
+ *
+ * Returns 0 when no power-of-two cycle fits at all -- notably Adventure Kid's
+ * own AKWF format, which is 600 samples per cycle. That is not a failure and
+ * the caller must not treat it as one: see the resampling path in the loader. */
 inline int wavInferFrameSize(const WavData &w)
 {
-    if (w.clmFrameSize >= 256 && w.clmFrameSize <= 4096 &&
-        (w.clmFrameSize & (w.clmFrameSize - 1)) == 0)
+    if (w.clmFrameSize >= 32 && w.clmFrameSize <= 4096 && wavIsPow2(w.clmFrameSize))
         return w.clmFrameSize;
     const int n = (int) w.samples.size();
-    for (int fs : { 2048, 1024, 512, 256 })
-        if (n % fs == 0 && n / fs >= 1)
+    for (int fs : { 2048, 1024, 512, 256, 128, 64, 32 })
+        if (n >= fs && n % fs == 0)
             return fs;
     return 0;
+}
+
+/* Resample every frame to `target` samples, linearly.
+ *
+ * wtBuild needs a power-of-two frame of at least 32; a 600-sample AKWF cycle
+ * is neither. Stretching each cycle to a power of two is what makes those
+ * playable at all, and costs nothing audible -- wtBuild band-limits the result
+ * afterwards regardless. */
+inline std::vector<float> wavResampleFrames(const std::vector<float> &in,
+                                            int nFrames, int frameSize,
+                                            int target)
+{
+    std::vector<float> out((size_t) nFrames * (size_t) target);
+    for (int f = 0; f < nFrames; f++) {
+        const float *src = in.data() + (size_t) f * (size_t) frameSize;
+        float *dst = out.data() + (size_t) f * (size_t) target;
+        for (int i = 0; i < target; i++) {
+            float pos = (float) i * (float) frameSize / (float) target;
+            int   i0  = (int) pos;
+            float t   = pos - (float) i0;
+            int   i1  = (i0 + 1) % frameSize;      /* wrap: it is a cycle */
+            if (i0 >= frameSize) i0 = frameSize - 1;
+            dst[i] = src[i0] + t * (src[i1] - src[i0]);
+        }
+    }
+    return out;
 }
 
 } // namespace tb

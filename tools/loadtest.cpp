@@ -458,6 +458,54 @@ int main(int argc, char **argv)
         settle(api, inst);
     }
 
+    /* ---- LFO depth must actually modulate ----
+     * The LFO fields were read by base+offset against a stale field order, so
+     * depth read the sync switch: modulation was near-silent and raising depth
+     * secretly enabled tempo sync. Reported as "LFO modulation of the wavetable
+     * position seems quite light". Driving the filter and watching the output
+     * move is the cheapest honest check that depth reaches the LFO at all. */
+    {
+        api->set_param(inst, "voice_mode", "Poly");
+        api->set_param(inst, "flt_type", "LP 24");
+        api->set_param(inst, "flt_freq", "40");     /* well down, so sweeping is audible */
+        api->set_param(inst, "flt_res", "60");
+        api->set_param(inst, "lfo1_shape", "Sine");
+        api->set_param(inst, "lfo1_sync", "Off");
+        api->set_param(inst, "lfo1_rate", "80");    /* a few Hz */
+        api->set_param(inst, "lfo1_phase", "0");
+        api->set_param(inst, "lfo1_offset", "64");
+        api->set_param(inst, "m1_src", "LFO 1");
+        api->set_param(inst, "m1_dst", "Filter Freq");
+        api->set_param(inst, "m1_amt", "127");
+        api->set_param(inst, "m1_on", "On");
+
+        long spread[2] = { 0, 0 };
+        for (int pass = 0; pass < 2; pass++) {
+            api->set_param(inst, "lfo1_depth", pass ? "127" : "0");
+            api->on_midi(inst, note_on, 3, 0);
+            long lo = 1 << 30, hi = 0;
+            for (int b = 0; b < 400; b++) {         /* ~1.16 s */
+                api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+                if (b < 60) continue;               /* let the attack settle */
+                long pk = 0;
+                for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
+                    long v = out[i] < 0 ? -out[i] : out[i];
+                    if (v > pk) pk = v;
+                }
+                if (pk > hi) hi = pk;
+                if (pk < lo) lo = pk;
+            }
+            spread[pass] = hi - lo;
+            api->on_midi(inst, all_off, 3, 0);
+            for (int b = 0; b < 120; b++) api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
+        }
+        CHECK(spread[1] > spread[0] * 3 && spread[1] > 300,
+              "LFO depth sweeps the filter (still %ld, depth 127 -> %ld)",
+              spread[0], spread[1]);
+        api->set_param(inst, "m1_on", "Off");
+        api->set_param(inst, "lfo1_depth", "0");
+    }
+
     /* ---- a note-off must release its voice whatever mode we are in NOW ----
      * Reported from hardware as a note that keeps sounding until you play
      * more notes (which is voice STEALING, not a release). Flipping to Mono

@@ -16,6 +16,7 @@
 #include "../src/ported/analog_tables.h"
 #include "../src/ported/lfo.h"
 #include "../src/ported/wt_oscillator.h"
+#include "../src/ported/wav.h"
 
 using namespace tb;
 
@@ -231,6 +232,113 @@ static void testLFO()
     CHECK(same && bounded, "S&H deterministic and bounded");
 }
 
+/* Sample & Hold must STEP, and hold. It was reported as sounding like a saw;
+ * the cause turned out to be the LFO param wiring in voice.h (depth read the
+ * sync switch), but the shape itself is worth pinning so a future edit to the
+ * phase handling cannot quietly turn it into a ramp -- which is exactly what
+ * the neighbouring `noise` shape is, since that one lerps between its random
+ * points. */
+static void testLfoSampleAndHold()
+{
+    printf("== lfo sample & hold ==\n");
+    const int PERIOD = 22050;              /* 2 Hz at 44100 */
+    LFO lfo;
+    lfo.setSampleRate(44100.0);
+    LFO::Parameters p;
+    p.waveShape = LFO::WaveShape::sampleAndHold;
+    p.frequency = 2.0f;
+    p.depth = 1.0f;
+    lfo.setParameters(p);
+    lfo.reset();
+    lfo.noteOn(0.0f);
+
+    /* Sample 8 times inside ONE period: a hold means all 8 are identical. */
+    float first = lfo.getOutput(), maxDev = 0.0f;
+    for (int i = 0; i < 8; i++) {
+        lfo.process(PERIOD / 16);
+        maxDev = std::max(maxDev, std::fabs(lfo.getOutput() - first));
+    }
+    CHECK(maxDev < 0.0001f, "S&H holds its value within a period (drift %.5f)", maxDev);
+
+    /* Across several periods it must actually take different values, and jump
+     * rather than ramp: a saw would creep by ~2/period in one direction. */
+    float vals[6];
+    for (int i = 0; i < 6; i++) { lfo.process(PERIOD); vals[i] = lfo.getOutput(); }
+    int distinct = 0, monotonic = 0;
+    for (int i = 0; i < 6; i++) {
+        bool seen = false;
+        for (int j = 0; j < i; j++) if (std::fabs(vals[i] - vals[j]) < 0.0001f) seen = true;
+        if (!seen) distinct++;
+        if (i && vals[i] > vals[i - 1]) monotonic++;
+    }
+    CHECK(distinct >= 4, "S&H picks fresh values each period (%d distinct of 6)", distinct);
+    CHECK(monotonic < 5, "S&H is not a ramp (%d of 5 steps rose)", monotonic);
+}
+
+/* Short and odd-length wavetables must PLAY, and play at the right pitch.
+ *
+ * Reported as "shorter wavetable lengths aren't playing" and "the playback is
+ * kind of buzzy - makes me wonder if there is a preferential length". Both came
+ * from frame-size inference that stopped at 256: a short cycle inferred
+ * nothing and the 2048 fallback made nFrames 0 (silent), and a file whose
+ * LENGTH divided by 2048 loaded with each frame spanning many real cycles
+ * (buzz). Adventure Kid's own AKWF format is 600 samples per cycle and hit the
+ * first case exactly. */
+static void testShortWavetables()
+{
+    printf("== short wavetables ==\n");
+
+    /* the inference itself */
+    WavData w;
+    w.sampleRate = 44100.0f;
+    w.samples.assign(600, 0.0f);
+    CHECK(wavInferFrameSize(w) == 0,
+          "a 600-sample AKWF cycle fits no power-of-two frame (got %d)",
+          wavInferFrameSize(w));
+    w.samples.assign(128, 0.0f);
+    CHECK(wavInferFrameSize(w) == 128, "a 128-sample cycle is found (got %d)",
+          wavInferFrameSize(w));
+    w.samples.assign(4096, 0.0f);
+    CHECK(wavInferFrameSize(w) == 2048,
+          "4096 samples still reads as two 2048 frames (got %d)",
+          wavInferFrameSize(w));
+
+    /* a 600-sample sine cycle, resampled, must survive as a sine */
+    std::vector<float> cyc(600);
+    for (int i = 0; i < 600; i++)
+        cyc[(size_t) i] = std::sin((float) i / 600.0f * 2.0f * (float) M_PI);
+    std::vector<float> up = wavResampleFrames(cyc, 1, 600, 2048);
+    float worst = 0.0f;
+    for (int i = 0; i < 2048; i++) {
+        float want = std::sin((float) i / 2048.0f * 2.0f * (float) M_PI);
+        worst = std::max(worst, std::fabs(up[(size_t) i] - want));
+    }
+    CHECK(up.size() == 2048 && worst < 0.01f,
+          "a 600-sample cycle stretches to 2048 without distorting it (worst %.4f)",
+          worst);
+
+    /* and it must build and play at the right pitch */
+    Wavetable wt;
+    bool built = wtBuild(wt, up.data(), 1, 2048, 44100.0f, 44100.0f);
+    CHECK(built && wt.size() == 1, "the stretched cycle builds a table");
+
+    if (built) {
+        WTOscillator osc;
+        osc.setSampleRate(44100.0);
+        osc.setWavetable(&wt);
+        WTOscillator::Params op;
+        op.position = 0.0f; op.leftGain = 1.0f; op.rightGain = 1.0f;
+        float l[8192] = { 0 }, r[8192] = { 0 };
+        osc.processAdding(69.0f, op, l, r, 8192);   /* A4 = 440 Hz */
+        int crossings = 0;
+        for (int i = 1; i < 8192; i++)
+            if (l[i - 1] <= 0.0f && l[i] > 0.0f) crossings++;
+        float hz = (float) crossings * 44100.0f / 8192.0f;
+        CHECK(hz > 420.0f && hz < 460.0f,
+              "it sounds at the note it was asked for (%.0f Hz for A4)", hz);
+    }
+}
+
 static void testAnalogTables()
 {
     printf("== analog tables ==\n");
@@ -295,6 +403,8 @@ int main()
     testFilter();
     testADSR();
     testLFO();
+    testLfoSampleAndHold();
+    testShortWavetables();
     testAnalogTables();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;

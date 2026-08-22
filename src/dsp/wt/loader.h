@@ -183,12 +183,27 @@ private:
             samples = std::move(w.samples);
             rate = w.sampleRate > 0 ? w.sampleRate : 44100.0f;
             frameSize = wavInferFrameSize(w);
-            if (!frameSize)
-                frameSize = 2048;                  /* last resort default */
+            if (!frameSize) {
+                /* No power-of-two cycle divides the file. That is the normal
+                 * shape of a single-cycle table -- Adventure Kid's own AKWF is
+                 * 600 samples -- so treat the whole file as ONE cycle rather
+                 * than forcing a 2048 default that would make nFrames 0 and
+                 * lose the file silently. Resampled to a power of two below. */
+                frameSize = (int) samples.size();
+            }
         }
 
         int nFrames = (int) samples.size() / frameSize;
         if (nFrames < 1) return nullptr;
+
+        /* wtBuild needs a power-of-two frame of at least 32. Anything else --
+         * a 600-sample AKWF cycle, a 3-sample oddity -- is stretched to 2048
+         * per cycle so it plays instead of being rejected. */
+        if (!wavIsPow2(frameSize) || frameSize < 32) {
+            const int target = 2048;
+            samples = wavResampleFrames(samples, nFrames, frameSize, target);
+            frameSize = target;
+        }
 
         /* memory ceiling: subsample frames evenly to fit */
         int maxFrames = (int) (kMaxBytesPerTable / (size_t) kBytesPerFrame);

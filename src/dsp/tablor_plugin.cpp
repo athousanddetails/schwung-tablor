@@ -311,7 +311,10 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path)
     e.path = path;
     if (const char *dot = strrchr(path, '.'); dot && !strncasecmp(dot, ".wt", 3)) {
         int fs = atoi(dot + 3);
-        if (fs >= 256 && fs <= 4096 && (fs & (fs - 1)) == 0)
+        /* 32, not 256: the same floor wtBuild accepts. A .wt64 was rejected
+         * here, fell through to the WAV reader, failed to parse as WAV and
+         * loaded nothing at all. */
+        if (fs >= 32 && fs <= 4096 && (fs & (fs - 1)) == 0)
             e.flacFrameSize = fs;
     }
     inst->loader.requestLoad(osc, e);

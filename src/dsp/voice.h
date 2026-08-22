@@ -233,12 +233,29 @@ public:
     }
 
 private:
-    static int lfoParam(int lfo, int field)
+    /* Named, NOT base+offset.
+     *
+     * This was `base[lfo] + field` against a comment listing the fields as
+     * shape, rate, sync, beat, depth, phase, offset. The generator emits them
+     * shape, rate, DEPTH, PHASE, SYNC, BEAT, offset, so four of the seven were
+     * crossed: depth read the sync switch (so LFO depth was ~0 and modulation
+     * was nearly inaudible), the sync test read depth (so turning depth up
+     * silently flipped the LFO to tempo sync), and beat and phase read each
+     * other. Reported as "LFO modulation of the wavetable position seems quite
+     * light -- not as strong as the knobs".
+     *
+     * Naming each param kills the whole class of bug: reordering the table can
+     * no longer silently re-wire the LFO. */
+    struct LfoParams { int shape, rate, depth, phase, sync, beat, offset; };
+    static const LfoParams &lfoParams(int lfo)
     {
-        /* fields: 0 shape, 1 rate, 2 sync, 3 beat, 4 depth, 5 phase,
-         * 6 offset — contiguous per LFO in params.h */
-        static const int base[2] = { TB_P_LFO1_SHAPE, TB_P_LFO2_SHAPE };
-        return base[lfo] + field;
+        static const LfoParams k[2] = {
+            { TB_P_LFO1_SHAPE, TB_P_LFO1_RATE, TB_P_LFO1_DEPTH, TB_P_LFO1_PHASE,
+              TB_P_LFO1_SYNC,  TB_P_LFO1_BEAT, TB_P_LFO1_OFFSET },
+            { TB_P_LFO2_SHAPE, TB_P_LFO2_RATE, TB_P_LFO2_DEPTH, TB_P_LFO2_PHASE,
+              TB_P_LFO2_SYNC,  TB_P_LFO2_BEAT, TB_P_LFO2_OFFSET },
+        };
+        return k[lfo & 1];
     }
 
     void updateParams(const VoiceContext &c, int blockSize)
@@ -252,20 +269,21 @@ private:
 
         ModSources src;
         for (int i = 0; i < kLfos; i++) {
+            const LfoParams &lk = lfoParams(i);
             LFO::Parameters lp;
-            lp.waveShape = (LFO::WaveShape) ((int) P[lfoParam(i, 0)] + 1); /* skip none */
-            float rate = potLfoRate(P[lfoParam(i, 1)]);
+            lp.waveShape = (LFO::WaveShape) ((int) P[lk.shape] + 1); /* skip none */
+            float rate = potLfoRate(P[lk.rate]);
             float rateMod = modOff.o[DST_LFO1_RATE + i];
             if (rateMod != 0.0f)
                 rate = std::clamp(rate * std::pow(2.0f, rateMod * 3.0f), 0.01f, 60.0f);
-            if (P[lfoParam(i, 2)] > 0.5f) {  /* sync */
-                float beats = kBeats[(int) P[lfoParam(i, 3)] & 15];
+            if (P[lk.sync] > 0.5f) {
+                float beats = kBeats[(int) P[lk.beat] & 15];
                 rate = c.bpm / 60.0f / beats;
             }
             lp.frequency = rate;
-            lp.depth  = pot01(P[lfoParam(i, 4)]);
-            lp.phase  = pot01(P[lfoParam(i, 5)]);
-            lp.offset = potBipolar(P[lfoParam(i, 6)]);
+            lp.depth  = pot01(P[lk.depth]);
+            lp.phase  = pot01(P[lk.phase]);
+            lp.offset = potBipolar(P[lk.offset]);
             lfos[i].setParameters(lp);
             if (blockSize > 0) lfos[i].process(blockSize);
             src.values[SRC_LFO1 + i] = lfos[i].getOutput();
