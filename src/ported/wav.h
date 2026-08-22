@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace tb {
@@ -122,6 +124,51 @@ inline int wavInferFrameSize(const WavData &w)
     if (w.clmFrameSize >= 32 && w.clmFrameSize <= 4096 && wavIsPow2(w.clmFrameSize))
         return w.clmFrameSize;
     return wavInferFrameSizeForLength((int) w.samples.size());
+}
+
+/* Find the shortest repeating unit in a SHORT file.
+ *
+ * Divisibility cannot tell one cycle from eight: a 256-sample file is equally
+ * "one frame of 256" and "eight frames of 32", and taking the whole file as a
+ * single cycle makes those eight cycles repeat inside every oscillator period
+ * -- audible as the table looping during playback. Correlating the candidate
+ * segments settles it from the signal itself.
+ *
+ * Deliberately only consulted for short files. A 2048-sample cycle whose
+ * CONTENT happens to be eight identical sub-cycles is a legitimate single
+ * cycle, and the long-file convention (2048) already reads it correctly;
+ * running detection there would drop it an octave and change existing sounds.
+ *
+ * Returns 0 when nothing repeats convincingly, which is the answer for a
+ * genuine single cycle. */
+inline int wavDetectCycle(const std::vector<float> &x, int n)
+{
+    if (n < 64) return 0;
+    for (int p : { 32, 64, 128, 256, 512, 1024 }) {
+        if (p * 2 > n || n % p != 0) continue;
+        /* Correlate ADJACENT segments and take the worst pair.
+         *
+         * Comparing every segment against the FIRST was tried and is wrong for
+         * the tables this exists to catch: a morphing wavetable drifts in
+         * amplitude across its frames, and lumping all the pairs into one sum
+         * let that drift drag the coefficient below the threshold, so an
+         * eight-frame table was read as two. A per-pair coefficient is
+         * scale-invariant -- a frame and the same frame at 95% correlate 1.0 --
+         * so only a real change of SHAPE counts against it. */
+        const int segs = n / p;
+        double worst = 1.0;
+        for (int s = 1; s < segs; s++) {
+            double num = 0.0, e0 = 0.0, e1 = 0.0;
+            for (int i = 0; i < p; i++) {
+                double a = x[(size_t) ((s - 1) * p + i)], b = x[(size_t) (s * p + i)];
+                num += a * b; e0 += a * a; e1 += b * b;
+            }
+            if (e0 <= 1e-12 || e1 <= 1e-12) { worst = 0.0; break; }
+            worst = std::min(worst, num / std::sqrt(e0 * e1));
+        }
+        if (worst > 0.95) return p;       /* smallest period wins */
+    }
+    return 0;
 }
 
 /* Resample every frame to `target` samples, linearly.

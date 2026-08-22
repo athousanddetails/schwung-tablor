@@ -187,6 +187,14 @@ private:
             samples = std::move(w.samples);
             rate = w.sampleRate > 0 ? w.sampleRate : 44100.0f;
             frameSize = wavInferFrameSize(w);
+            /* A short file that repeats is MULTI-FRAME, not one long cycle.
+             * Taking the whole thing as a single cycle made its content loop
+             * inside every oscillator period. Only for short files -- see
+             * wavDetectCycle. */
+            if (w.clmFrameSize <= 0 && (int) samples.size() <= 2048) {
+                int cyc = wavDetectCycle(samples, (int) samples.size());
+                if (cyc > 0) frameSize = cyc;
+            }
             if (!frameSize) {
                 /* No power-of-two cycle divides the file. That is the normal
                  * shape of a single-cycle table -- Adventure Kid's own AKWF is

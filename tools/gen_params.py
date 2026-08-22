@@ -15,13 +15,22 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 # ---------------------------------------------------------------- enums
 FILTER_TYPES = ["LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24"]
-SUB_WAVES    = ["Sine", "Triangle", "Saw", "Square", "Pulse 25", "Pulse 12"]
+# Same rule (this list drives the `waveform` graphic): "Pulse 25"/"Pulse 12"
+# were unrecognised and drew sines. "Pulse" and "Pulse Tr" are both in the set.
+SUB_WAVES    = ["Sine", "Triangle", "Saw", "Square", "Pulse", "Pulse Tr"]
 NOISE_TYPES  = ["White", "Pink"]
-LFO_SHAPES   = ["Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Square+", "S&H", "Noise"]
+# Option NAMES are what the host draws a graphic from: Schwung matches them
+# against a known set (viz_draw.mjs lfoShapeIdOf) and falls back to a SINE for
+# anything it does not recognise. "Square+" -- our unipolar square -- was not
+# in that set, so it drew a sine, which is a different waveform entirely.
+# "Pulse" is recognised, and a 50% unipolar square has exactly the silhouette
+# of the square glyph it selects. Renaming is safe for saved sounds: presets
+# store the INDEX, and the order here is unchanged.
+LFO_SHAPES   = ["Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Pulse", "S&H", "Noise"]
 LFO_BEATS    = ["1/32", "1/16T", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.",
                 "1/4", "1/2T", "1/4.", "1/2", "1/1T", "1/2.", "1/1", "2/1"]
 ONOFF        = ["Off", "On"]

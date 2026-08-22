@@ -120,9 +120,15 @@ int main(int argc, char **argv)
         api->on_midi(inst, off, 3, 0);
         for (int b = 0; b < 60; b++) api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
 
+        /* the digest header is "<frames>,<samples>," -- the frame count is
+         * the thing that says whether the cycle length was read correctly.
+         * One frame for a file that is really eight is the "looping" report. */
+        int frames = 0;
+        sscanf(dig, "%d,", &frames);
+
         bool ok = peak > 500 && loaded;
         if (!ok) silent++;
-        printf("  %-22s peak %6ld  %s\n", f.c_str(), peak,
+        printf("  %-22s peak %6ld  frames %3d  %s\n", f.c_str(), peak, frames,
                !loaded ? "NOT LOADED (fell back to the previous table)"
                        : (peak > 500 ? "plays" : "SILENT"));
     }

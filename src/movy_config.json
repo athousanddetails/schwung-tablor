@@ -304,8 +304,8 @@
        "Triangle",
        "Saw",
        "Square",
-       "Pulse 25",
-       "Pulse 12"
+       "Pulse",
+       "Pulse Tr"
       ]
      },
      {
@@ -451,7 +451,7 @@
        "Saw Up",
        "Saw Down",
        "Square",
-       "Square+",
+       "Pulse",
        "S&H",
        "Noise"
       ],
@@ -545,7 +545,7 @@
        "Saw Up",
        "Saw Down",
        "Square",
-       "Square+",
+       "Pulse",
        "S&H",
        "Noise"
       ],

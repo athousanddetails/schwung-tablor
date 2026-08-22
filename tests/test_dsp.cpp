@@ -303,6 +303,26 @@ static void testShortWavetables()
           "4096 samples still reads as two 2048 frames (got %d)",
           wavInferFrameSize(w));
 
+    /* a short file that REPEATS is several frames, not one long cycle --
+     * reported as "the shorter wavetables now loop during playback" */
+    {
+        std::vector<float> eight(256);
+        for (int f = 0; f < 8; f++)
+            for (int i = 0; i < 32; i++)
+                eight[(size_t)(f * 32 + i)] =
+                    std::sin((float) i / 32.0f * 2.0f * (float) M_PI) * (1.0f - 0.05f * f);
+        CHECK(wavDetectCycle(eight, 256) == 32,
+              "eight 32-sample cycles are found as 32 (got %d)",
+              wavDetectCycle(eight, 256));
+
+        std::vector<float> one(256);
+        for (int i = 0; i < 256; i++)
+            one[(size_t) i] = std::sin((float) i / 256.0f * 2.0f * (float) M_PI);
+        CHECK(wavDetectCycle(one, 256) == 0,
+              "a genuine single cycle reports no repeat (got %d)",
+              wavDetectCycle(one, 256));
+    }
+
     /* a 600-sample sine cycle, resampled, must survive as a sine */
     std::vector<float> cyc(600);
     for (int i = 0; i < 600; i++)
