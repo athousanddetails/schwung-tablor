@@ -253,9 +253,13 @@ int main(int argc, char **argv)
     CHECK(strstr(big, "\"wt_pack\"") && strstr(big, "\"wt1_select\"") &&
           strstr(big, "\"wt2_select\""),
           "chain_params publishes the turnable selection enums");
-    CHECK(strstr(big, "\"wt1_shape\"") && strstr(big, "\"wt2_shape\""),
-          "chain_params declares the shape digests (the manager only streams "
-          "declared keys)");
+    CHECK(strstr(big, "\"wt1_shape\"") && strstr(big, "\"wt2_shape\"") &&
+          strstr(big, "\"wt_paths\""),
+          "chain_params declares the shape digests and the path list (the "
+          "manager only streams declared keys)");
+    n = api->get_param(inst, "wt_paths", big, sizeof big);
+    CHECK(n > 10 && big[0] == '[' && strstr(big, "/data/UserData"),
+          "wt_paths lists the file behind each wtN_select index (%d bytes)", n);
 
     n = api->get_param(inst, "wt_pack_list", big, sizeof big);
     CHECK(n > 10 && big[0] == '[' && strstr(big, "\"label\":\"All\""),

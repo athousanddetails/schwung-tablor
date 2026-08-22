@@ -81,6 +81,8 @@ struct tablor_instance {
         std::vector<int>         filtered; /* indices into paths            */
         std::string chain_params;          /* static head + dynamic options */
         std::string pack_list;             /* wt_pack_list JSON             */
+        std::string path_list;             /* wt_paths JSON, index-aligned
+                                            * with the wtN_select options  */
     };
     std::shared_ptr<const SelSnapshot> sel { std::make_shared<SelSnapshot>() };
     std::atomic<int> wt_pack { 0 };
@@ -411,6 +413,21 @@ static void tb_publish_selection(tablor_instance *inst)
     }
     pl += "]";
 
+    /* wt_paths: the FILE for each wtN_select index. A browser cannot read a
+     * value the device did not push, and nothing pushes when a pot changes a
+     * table -- but the select INDEX does push, so with the paths in hand the
+     * page can fetch and draw the file itself instead of waiting on us. */
+    std::string &pl2 = snap->path_list;
+    pl2 = "[";
+    for (size_t i = 0; i < snap->filtered.size(); i++) {
+        int g = snap->filtered[i];
+        if (i) pl2 += ",";
+        pl2 += "\"";
+        if (g > 0 && g < (int) l.size()) tb_json_append(pl2, l[(size_t) g].path);
+        pl2 += "\"";
+    }
+    pl2 += "]";
+
     /* chain_params: the static head plus the three dynamic entries */
     std::string &out = snap->chain_params;
     out.assign(tb_chain_params_json);
@@ -449,7 +466,8 @@ static void tb_publish_selection(tablor_instance *inst)
      * marks them un-turnable; they live in no ui_hierarchy page, so no
      * knob surface ever shows them -- they exist purely as a data channel. */
     out += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}"
-           ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}";
+           ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}"
+           ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"int\",\"min\":0,\"max\":0}";
     out += "]";
 
     std::atomic_store(&inst->sel,
@@ -828,6 +846,11 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         char tmp[16];
         snprintf(tmp, sizeof tmp, "%d", inst->wt_pack.load(std::memory_order_relaxed));
         return write_str(buf, buf_len, tmp);
+    }
+    if (!strcmp(key, "wt_paths")) {
+        auto snap = inst->selection();
+        return write_str(buf, buf_len,
+                         snap->path_list.empty() ? "[]" : snap->path_list.c_str());
     }
     if (!strcmp(key, "wt_pack_list")) {
         auto snap = inst->selection();

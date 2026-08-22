@@ -426,29 +426,77 @@ function parseShape(str) {
   return { frames: nf, samples: ns, data: out };
 }
 
-/* Getting a fresh digest out of the device is not a read -- it is a NUDGE.
+/* Keeping the display live without reloading the page.
  *
- * A module web UI can never pull a value: getParam answers from the
- * manager's cache in standalone mode, and the iframe path is the same
- * (remote-ui.js handleIframeGetParam: "not currently supported by the WS
- * protocol, so read from local state"). Values only ARRIVE, and they arrive
- * on subscribe, on the notify ring, or on a 30 s refresh loop. The notify
- * ring is driven by set_param traffic; the digest is rebuilt on the
- * module's worker when a table lands, with no set_param behind it, so
- * nothing ever notifies and the display sat 30 s stale.
+ * A module web UI cannot pull a value: getParam answers from the manager's
+ * cache in both the standalone and iframe paths (remote-ui.js
+ * handleIframeGetParam: "not currently supported by the WS protocol, so read
+ * from local state"). Values only ARRIVE -- on subscribe, on the notify ring,
+ * or on a 30 s refresh. The ring only carries keys the DEVICE set, so a table
+ * change pushes wtN_select (the index) and never the new digest.
  *
- * resubscribe() is the API's own escape hatch -- it makes the manager
- * re-read every declared param from the device and push them. Repeating a
- * subscribe is safe for this page: the parent guards custom_ui with
- * `if (s.customUI[comp] === url) return;  // avoid reloading a live iframe`.
- * Debounced, because a spin through tables should cost one re-read. */
-var nudgeTimer = null;
-function nudgeShapes(delay) {
-  if (!schwungRemote.resubscribe) return;
-  clearTimeout(nudgeTimer);
-  nudgeTimer = setTimeout(function () {
-    try { schwungRemote.resubscribe(); } catch (e) {}
-  }, delay || 400);
+ * resubscribe() would force a re-read, but the manager answers it with a
+ * chain_params message and remote-ui.js re-renders the slot unconditionally
+ * on that (unlike its hierarchy handler, which guards on the structure being
+ * unchanged) -- which rebuilds the iframe and reloads this page. That is the
+ * flash, and it is too blunt to use per table change.
+ *
+ * So the page reads the wavetable ITSELF. wt_paths gives the file behind
+ * every wtN_select index, the manager serves files over /files/download, and
+ * decodeAudioData handles the FLAC these tables are stored as. A change from
+ * either side lands as an index or a path, and both resolve to a file we can
+ * draw. The module's digest still paints first and covers any browser that
+ * will not decode the file. */
+var PATHS = [];
+
+function wtRootRelative(path) {
+  return "/files/download?path=" + encodeURIComponent(path);
+}
+
+/* .wt2048 names its own frame size; a plain .wav gets the usual 2048. */
+function frameSizeOf(path) {
+  var m = /\.wt(\d+)$/i.exec(path || "");
+  var n = m ? parseInt(m[1], 10) : 0;
+  return (n >= 256 && n <= 4096 && (n & (n - 1)) === 0) ? n : 2048;
+}
+
+var audioCtx = null;
+var shapeReq = {};      /* osc -> path currently being fetched */
+
+function loadShapeFromFile(osc, path) {
+  if (!path || shapeReq[osc] === path) return;
+  shapeReq[osc] = path;
+  if (!window.fetch || !(window.AudioContext || window.webkitAudioContext)) return;
+  fetch(wtRootRelative(path)).then(function (r) {
+    if (!r.ok) throw 0;
+    return r.arrayBuffer();
+  }).then(function (buf) {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx.decodeAudioData(buf);
+  }).then(function (ab) {
+    var pcm = ab.getChannelData(0);
+    var fs = frameSizeOf(path);
+    var nf = Math.floor(pcm.length / fs);
+    if (nf < 1) return;
+    var OF = Math.min(24, nf), OS = 64, out = [];
+    for (var f = 0; f < OF; f++) {
+      var src = (OF === 1) ? 0 : Math.round(f * (nf - 1) / (OF - 1));
+      var a = new Float32Array(OS);
+      for (var i = 0; i < OS; i++) a[i] = pcm[src * fs + Math.floor(i * fs / OS)] || 0;
+      out.push(a);
+    }
+    SHAPE[osc] = { frames: OF, samples: OS, data: out };
+    redrawSoon();
+  }).catch(function () {
+    /* no decode: whatever the module's digest gave us stays on screen */
+    shapeReq[osc] = null;
+  });
+}
+
+/* A select index resolves through wt_paths; a filepath is already a path. */
+function shapeFromIndex(osc, idx) {
+  var i = parseInt(idx, 10);
+  if (!isNaN(i) && PATHS[i]) loadShapeFromFile(osc, PATHS[i]);
 }
 
 function ingestShape(osc, v) {
@@ -458,6 +506,9 @@ function ingestShape(osc, v) {
 [1, 2].forEach(function (osc) {
   CTL["wt" + osc + "_shape"] = { set: function (v) { ingestShape(osc, v); } };
 });
+CTL.wt_paths = { set: function (v) {
+  try { var a = JSON.parse(v); if (a && a.length) PATHS = a; } catch (e) {}
+} };
 function fetchShape(osc) {
   if (!schwungRemote.getParam) return;
   schwungRemote.getParam(K + "wt" + osc + "_shape").then(function (v) {
@@ -531,8 +582,7 @@ function buildOsc(n) {
   var watch = CTL["wt" + n + "_table"].set;
   CTL["wt" + n + "_table"] = { set: function (p) {
     watch(p);
-    if (prevPath !== null && p !== prevPath) nudgeShapes(350);
-    prevPath = p;
+    if (p !== prevPath) { prevPath = p; if (p) loadShapeFromFile(n, p); }
   } };
 }
 
@@ -668,7 +718,7 @@ function buildPickers(cp) {
 
     ts.addEventListener("change", function () {
       send("wt" + n + "_select", ts.value);
-      nudgeShapes(450);        /* let the worker load and digest it first */
+      shapeFromIndex(n, ts.value);
     });
     ps.addEventListener("change", function () {
       packSels.forEach(function (o) { o.value = ps.value; });
@@ -682,6 +732,7 @@ function buildPickers(cp) {
       }) : -1;
       if (i < 0) { i = parseInt(v, 10); if (isNaN(i)) return; }
       ts.value = String(i);
+      shapeFromIndex(n, i);          /* the pot moved on the device */
     } };
   });
 
