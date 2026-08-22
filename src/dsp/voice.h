@@ -290,13 +290,13 @@ private:
         }
 
         /* ---- envelopes ---- */
-        filterADSR.setAttack(potEnvTime(P[TB_P_FLT_A]));
+        filterADSR.setAttack(potAttackTime(P[TB_P_FLT_A]));
         filterADSR.setDecay(potEnvTime(P[TB_P_FLT_D]));
         filterADSR.setSustainLevel(pot01(P[TB_P_FLT_S]));
         filterADSR.setRelease(potEnvTime(P[TB_P_FLT_R]));
         if (blockSize > 0) filterADSR.process(blockSize);
 
-        adsr.setAttack(potEnvTime(P[TB_P_VCA_A]));
+        adsr.setAttack(potAttackTime(P[TB_P_VCA_A]));
         adsr.setDecay(potEnvTime(P[TB_P_VCA_D]));
         adsr.setSustainLevel(pot01(P[TB_P_VCA_S]));
         adsr.setRelease(fastKill ? 0.01f : potEnvTime(P[TB_P_VCA_R]));

@@ -17,6 +17,24 @@ inline float potEnvTime(float v)
     return std::pow(10.0f, pot01(v) * 4.0f - 3.0f);
 }
 
+/* ATTACK gets its own curve, weighted to the low end the way the original
+ * does: it declares attack as a JUCE range with skew 0.2, which is x^5, so a
+ * quarter turn there is ~60 ms. The shared exponential above put a quarter
+ * turn at 10 ms and put the whole 1-40 ms range inside the first third of the
+ * knob -- reported as "0 to 50 have a fair amount of clickiness, I'm having to
+ * use the LP filter to attenuate the click".
+ *
+ * Same shape as the original, our 10 s ceiling rather than its 60 s (a minute
+ * of attack is not a thing anyone reaches for on this box, and it would cost
+ * half the knob). The 0.5 ms floor keeps a truly instant attack available at 0
+ * for percussive sounds. */
+inline float potAttackTime(float v)
+{
+    const float x = pot01(v);
+    const float x5 = x * x * x * x * x;
+    return 0.0005f + 10.0f * x5;
+}
+
 /* LFO rate: 0.02 .. 20 Hz, exponential. */
 inline float potLfoRate(float v)
 {
