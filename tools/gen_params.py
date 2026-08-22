@@ -15,7 +15,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 # ---------------------------------------------------------------- enums
 FILTER_TYPES = ["LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24"]
@@ -30,7 +30,18 @@ NOISE_TYPES  = ["White", "Pink"]
 # "Pulse" is recognised, and a 50% unipolar square has exactly the silhouette
 # of the square glyph it selects. Renaming is safe for saved sounds: presets
 # store the INDEX, and the order here is unchanged.
-LFO_SHAPES   = ["Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Pulse", "S&H", "Noise"]
+# Order matters, and not for us: some hosts draw the shape GLYPH from the
+# option INDEX rather than the name, so the index has to BE Schwung's shape id
+# (viz_draw.mjs lfoShapeSample): 0 sine, 1 triangle, 2 saw up, 3 square,
+# 4 S&H, 6 saw down, 7 noise. Reported from a device as Saw Down drawing a
+# square, Square drawing S&H and S&H drawing a saw down -- each one exactly the
+# glyph belonging to its index. Id 5 has no case and falls through to a sine,
+# so the least-reached shape sits there.
+#
+# A name-based host is unaffected: it resolves by text and ignores the order.
+# The DSP no longer infers the waveform from this position either -- see
+# lfoWaveShape() in voice.h.
+LFO_SHAPES   = ["Sine", "Triangle", "Saw Up", "Square", "S&H", "Pulse", "Saw Down", "Noise"]
 LFO_BEATS    = ["1/32", "1/16T", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.",
                 "1/4", "1/2T", "1/4.", "1/2", "1/1T", "1/2.", "1/1", "2/1"]
 ONOFF        = ["Off", "On"]

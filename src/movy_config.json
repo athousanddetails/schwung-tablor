@@ -449,10 +449,10 @@
        "Sine",
        "Triangle",
        "Saw Up",
-       "Saw Down",
        "Square",
-       "Pulse",
        "S&H",
+       "Pulse",
+       "Saw Down",
        "Noise"
       ],
       "lfo": "shape"
@@ -543,10 +543,10 @@
        "Sine",
        "Triangle",
        "Saw Up",
-       "Saw Down",
        "Square",
-       "Pulse",
        "S&H",
+       "Pulse",
+       "Saw Down",
        "Noise"
       ],
       "lfo": "shape"

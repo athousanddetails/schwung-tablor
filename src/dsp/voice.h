@@ -246,6 +246,28 @@ private:
      *
      * Naming each param kills the whole class of bug: reordering the table can
      * no longer silently re-wire the LFO. */
+    /* UI option index -> engine waveform, spelled out.
+     *
+     * This was `(WaveShape)(index + 1)`, which silently required our option
+     * ORDER to match gin's enum order. The options are now ordered to match
+     * the host's shape-glyph ids instead (see LFO_SHAPES in gen_params.py), so
+     * the two orders are deliberately different and the arithmetic would map
+     * every shape to the wrong waveform. */
+    static LFO::WaveShape lfoWaveShape(int uiIndex)
+    {
+        static const LFO::WaveShape k[8] = {
+            LFO::WaveShape::sine,          /* 0 Sine     */
+            LFO::WaveShape::triangle,      /* 1 Triangle */
+            LFO::WaveShape::sawUp,         /* 2 Saw Up   */
+            LFO::WaveShape::square,        /* 3 Square   */
+            LFO::WaveShape::sampleAndHold, /* 4 S&H      */
+            LFO::WaveShape::squarePos,     /* 5 Pulse    */
+            LFO::WaveShape::sawDown,       /* 6 Saw Down */
+            LFO::WaveShape::noise,         /* 7 Noise    */
+        };
+        return k[uiIndex < 0 ? 0 : (uiIndex > 7 ? 7 : uiIndex)];
+    }
+
     struct LfoParams { int shape, rate, depth, phase, sync, beat, offset; };
     static const LfoParams &lfoParams(int lfo)
     {
@@ -271,7 +293,7 @@ private:
         for (int i = 0; i < kLfos; i++) {
             const LfoParams &lk = lfoParams(i);
             LFO::Parameters lp;
-            lp.waveShape = (LFO::WaveShape) ((int) P[lk.shape] + 1); /* skip none */
+            lp.waveShape = lfoWaveShape((int) P[lk.shape]);
             float rate = potLfoRate(P[lk.rate]);
             float rateMod = modOff.o[DST_LFO1_RATE + i];
             if (rateMod != 0.0f)

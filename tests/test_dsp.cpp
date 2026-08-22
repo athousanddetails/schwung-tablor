@@ -359,6 +359,52 @@ static void testShortWavetables()
     }
 }
 
+/* Each LFO option must (a) sit at the index of the host glyph that depicts it
+ * and (b) actually produce that waveform. A device reported Saw Down drawing a
+ * square, Square drawing S&H and S&H drawing a saw down -- each the glyph
+ * belonging to its INDEX, because some hosts pick the picture by index rather
+ * than by name. The order is now the host's id order, which means the engine
+ * can no longer derive the waveform from the index; this checks both halves so
+ * they cannot drift apart again. */
+static void testLfoShapeOrder()
+{
+    printf("== lfo shape order ==\n");
+    /* index -> what the host draws there (viz_draw.mjs lfoShapeSample) */
+    struct { int index; const char *name; } expect[] = {
+        { 0, "Sine" }, { 1, "Triangle" }, { 2, "Saw Up" }, { 3, "Square" },
+        { 4, "S&H" },  { 5, "Pulse" },    { 6, "Saw Down" }, { 7, "Noise" },
+    };
+
+    const int PERIOD = 22050;                    /* 2 Hz */
+    for (auto &e : expect) {
+        LFO lfo;
+        lfo.setSampleRate(44100.0);
+        LFO::Parameters p;
+        /* the same table voice.h uses */
+        static const LFO::WaveShape k[8] = {
+            LFO::WaveShape::sine, LFO::WaveShape::triangle, LFO::WaveShape::sawUp,
+            LFO::WaveShape::square, LFO::WaveShape::sampleAndHold,
+            LFO::WaveShape::squarePos, LFO::WaveShape::sawDown, LFO::WaveShape::noise,
+        };
+        p.waveShape = k[e.index];
+        p.frequency = 2.0f; p.depth = 1.0f;
+        lfo.setParameters(p); lfo.reset(); lfo.noteOn(0.0f);
+
+        /* sample a full cycle */
+        float v[8];
+        for (int i = 0; i < 8; i++) { lfo.process(PERIOD / 8); v[i] = lfo.getOutput(); }
+
+        bool ok = true;
+        if (!strcmp(e.name, "Saw Up"))        ok = v[6] > v[1];       /* rises */
+        else if (!strcmp(e.name, "Saw Down")) ok = v[6] < v[1];       /* falls */
+        else if (!strcmp(e.name, "Square"))   ok = v[1] > 0.9f && v[6] < -0.9f;
+        else if (!strcmp(e.name, "Pulse"))    ok = v[1] > 0.9f && v[6] > -0.01f && v[6] < 0.01f;
+        else if (!strcmp(e.name, "Triangle")) ok = v[1] > 0.0f && v[5] < 0.0f;
+        else if (!strcmp(e.name, "Sine"))     ok = v[1] > 0.5f && v[5] < -0.5f;
+        CHECK(ok, "index %d is %s, and sounds like it", e.index, e.name);
+    }
+}
+
 static void testAnalogTables()
 {
     printf("== analog tables ==\n");
@@ -424,6 +470,7 @@ int main()
     testADSR();
     testLFO();
     testLfoSampleAndHold();
+    testLfoShapeOrder();
     testShortWavetables();
     testAnalogTables();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
