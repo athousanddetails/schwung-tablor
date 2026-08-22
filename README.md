@@ -3,11 +3,19 @@
 **A super-simple 2-oscillator wavetable synth for [Schwung](https://github.com/charlesvestal/schwung) on the Ableton Move.**
 
 Tablor is built around one idea: switching wavetables should be the fastest,
-most fun thing on the box. Touch the WT knob, click the jog, and browse your
-folder with the sound following the cursor. Everything else stays out of the
-way.
+most fun thing on the box. The first two knobs on the first page ARE the two
+wavetables — turn one and the sound changes under your fingers. Everything
+else stays out of the way.
 
-![13 pages, 93 controls, zero menus-inside-menus]()
+![Main page: both wavetables on knobs 1-2, position, level and tune](docs/img/move-main.png)
+
+13 pages, 95 controls, no menus inside menus. The graphics are Schwung's own
+— declared, not drawn by us — so the filter curve and both envelopes are the
+real values:
+
+| Filter | Envelopes |
+|---|---|
+| ![Filter page](docs/img/move-filter.png) | ![Env page](docs/img/move-env.png) |
 
 ## Features
 
@@ -37,18 +45,27 @@ All tables live in one folder on the Move:
 /data/UserData/UserLibrary/Wavetables/
 ```
 
-Drop `.wav` wavetables there with Move Manager or the Schwung manager's file
-browser — **Serum, Vital and Ableton exports all work** (the frame size is
-read from the Serum `clm` chunk when present, otherwise inferred). Factory
-packs are seeded on first run:
+Drop wavetables there with Move Manager or the Schwung manager's file browser
+— **Serum, Vital and Ableton exports all work**. `.wav` frame size is read
+from the Serum `clm` chunk when present and inferred otherwise; Ableton's
+FLAC-compressed `.wtNNNN` names its frame size in the extension. Factory packs
+are seeded on first run:
 
 - **Adventure Kid** (AKWF/AKWP) — 65 tables, public domain, by Kristoffer
   Ekstrand
 - **Neu KatalYst** — 50 tables, free ("use them in all your synths")
 
-Selection is the stock Schwung file browser on-device: the WT1 / WT2 cells
-are bracketed, so touching the pot and clicking the jog opens the folder —
-live preview means you hear each table as the cursor passes it.
+On the device, the two wavetables live on knobs 1 and 2 of the main page.
+Turn a knob to step through the library and hear each table as you land on
+it; hold and click to open a full-screen scrolling picker when you want to
+jump somewhere specific.
+
+The file browser and the pack filter are in the **web panel** rather than on
+the Move. Both used a control a knob cannot turn, so each one cost a whole
+page on a four-cell screen — and the browser's graphic was Schwung's stock
+`sample` shape, which is a fixed drawing that never reads the file, so it
+told you nothing about the table you had loaded. The parameters still exist
+and still save with the patch; they simply have no cell on the hardware.
 
 ## The interface
 
@@ -58,17 +75,27 @@ disagree:
 
 1. **The stock Shadow UI** (Schwung ≥ 0.12): knob pages with *declared* `viz`
    graphics — envelopes, filter curve, LFO shapes, faders, switches — plus the
-   native full-screen preset browser, the wavetable file browser (bracketed
-   cell: touch the pot and click the jog, with live preview while you browse),
-   and the on-screen keyboard for preset renames. 21 graphics declared,
-   validated by Schwung's own `validate_contract` (zero guesses).
+   native full-screen preset browser, the scrolling wavetable picker on the
+   WT knobs, and the on-screen keyboard for preset renames. 19 graphics
+   declared, validated by Schwung's own `validate_contract` (zero guesses).
 
    Page order: `[Presets] › Main › Unison › Shape › Filter › Env › Env+ ›
    LFO 1 › LFO 2 › Mod 1-2 › Mod 3-4 › Global › User › U.Map`.
 2. **[Movy](https://github.com/DimaDake/schwung-movy)**: the same pages as
    Movy banks, with live filter curves, dual envelope graphics and LFO
    previews.
-3. **Web panel**: every control in the browser, live in both directions.
+3. **Web panel**: every control in the browser, live in both directions, laid
+   out the way the plugin this came from lays out — and it draws the wavetable
+   you actually have loaded.
+
+   ![Web panel](docs/img/web-panel.png)
+
+   The waterfall is the real file: the module publishes a digest of the loaded
+   table, and the panel also reads the file itself over the manager's file API
+   and decodes it, so changing a table — from the browser **or** from the pot
+   on the Move — redraws it. The ADSR and LFO curves are computed from the live
+   parameter values. Wavetable and pack pickers sit in each oscillator's title
+   bar.
 
 ## Building
 
@@ -91,6 +118,10 @@ into in the 0.12 parameter pages — the SPI-callback cost of a dynamic
 `chain_params`, the `sample` graphic being a placeholder rather than the
 file's waveform, and two page-ordering traps — each with the file and line it
 comes from, and a suggestion.
+
+A separate hunt, for a pad note-off the host sometimes never delivers, is
+written up with its traces in
+[charlesvestal/schwung#249](https://github.com/charlesvestal/schwung/issues/249).
 
 ## Credits & licenses
 
