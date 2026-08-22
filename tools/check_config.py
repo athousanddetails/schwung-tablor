@@ -159,9 +159,17 @@ if m3:
         check(t in levels, f"nav target {t} missing")
     for lid in levels:
         check(lid == "root" or lid in nav, f"level {lid} unreachable")
+    # Params that exist and stream but deliberately have NO cell on the Move.
+    # Listed rather than exempted by pattern so adding one is a decision:
+    #   wt1_table / wt2_table  the filepath browsers -- opaque to a knob, and
+    #                          the graphic beside them never read the file
+    #   wt_pack                the pack chooser -- a whole page for a 3-row list
+    # All three are reachable from the web UI, which is where they belong.
+    DEVICE_HIDDEN = {"wt1_table", "wt2_table", "wt_pack"}
     for k in seen_keys:
         if k not in ("preset",):            # preset is the browser's list_param
-            check(k in hkeys or k in ("save_preset", "preset_name"),
+            check(k in hkeys or k in DEVICE_HIDDEN
+                  or k in ("save_preset", "preset_name"),
                   f"movy key {k} missing from hierarchy")
 
     # viz contiguity: a group's members must sit adjacent within one 4-cell

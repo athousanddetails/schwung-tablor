@@ -327,8 +327,6 @@ VIZ = {
     "noise_level": {"kind": "fader"},
     "volume": {"kind": "fader"},
     "legato": {"kind": "switch"},
-    "wt1_table": {"kind": "sample"},
-    "wt2_table": {"kind": "sample"},
     "save_preset": {"kind": "switch"},
     "m1_on": {"kind": "switch"}, "m2_on": {"kind": "switch"},
     "m3_on": {"kind": "switch"}, "m4_on": {"kind": "switch"},
@@ -479,14 +477,21 @@ def build_hierarchy():
                                 "name": s["full"] + " Table", "type": "enum"})
         else:
             root_params.append(hier_param(s))
-    # The pack chooser, then the browsers it scopes.
-    root_params.append({"level": "wtpack", "label": "WT Pack"})
-    for s in osc_row:
-        if s and s["type"] == "file":
-            d = hier_param(s)
-            d["name"] = s["full"] + " File"
-            root_params.append(d)
-
+    # NEITHER the pack chooser NOR the filepath browsers appear on the device.
+    #
+    # Both were opaque to a knob, so each claimed a whole cell and the pair of
+    # them pushed extra MAIN pages: one showing two brackets under the stock
+    # "sample" graphic -- a fixed shape that never reads the file
+    # (viz_draw.mjs drawSample), so it said nothing about the loaded table --
+    # and one that was just a three-row list of pack names. Reported as "what
+    # is this shit page, we don't need this on the module".
+    #
+    # Nothing is lost. wt1_select / wt2_select are on knobs 1-2, and an enum
+    # is divable, so hold+click opens a scrolling picker over every table:
+    # with no pack chosen the list is "All", and the option cap (128) is
+    # comfortably above the libraries this ships against. wt_pack and the
+    # wtN_table keys still exist and still stream -- the web UI drives both --
+    # they simply have no cell on the Move.
     root_params.append({"key": "preset_name", "name": "Rename", "type": "string"})
     for lid, label in level_ids:
         root_params.append({"level": lid, "label": label})
@@ -499,18 +504,11 @@ def build_hierarchy():
         "knobs": [sel_of.get(s["key"], s["key"]) for s in osc_row if s],
     }
 
-    # An ITEMS level, deliberately not an enum knob. The host re-reads a
-    # component's contract after an items selection settles (page_controller
-    # commitItem -> armContractSettle); a plain enum commit does NOT arm that
-    # re-read, so as a knob the pack would change and wt1_select's options
-    # would never refresh.
-    levels["wtpack"] = {
-        "name": "WT Pack",
-        "label": "WT Pack",
-        "items_param": "wt_pack_list",
-        "select_param": "wt_pack",
-        "navigate_to": "root",
-    }
+    # (The WT Pack items level lived here. It existed so the host would
+    # re-read the contract after a pack commit -- armContractSettle -- which
+    # only matters if the pack can be changed from the device, and it no
+    # longer can. The web UI sets wt_pack directly.)
+
     return {"levels": levels}
 
 hierarchy_json = json.dumps(build_hierarchy(), separators=(",", ":"))

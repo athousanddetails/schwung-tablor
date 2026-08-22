@@ -25,10 +25,27 @@ for (const sub of ['["Init","Adventure Kid/AKWP 0001"]', '"Init"',
 const chain = JSON.parse(chainRaw);
 const hier  = JSON.parse(un(hdr.match(/tb_ui_hierarchy_json =\n    "(.*)";/)[1]));
 const r = validateContract({ id: "tablor", hierarchy: hier, chainParams: chain });
+
+/* Params that exist and stream but deliberately have NO cell on the Move:
+ * the filepath browsers were opaque to a knob and the graphic beside them
+ * never read the file, and the pack chooser spent a whole page on a
+ * three-row list. Both are driven from the web UI instead. The validator is
+ * right that no level reaches them, so the finding is downgraded rather than
+ * switched off -- and only when it names exactly these keys, so a genuinely
+ * orphaned param still fails the build. */
+const DEVICE_HIDDEN = new Set(["wt1_table", "wt2_table", "wt_pack"]);
+const isDeliberate = (f) => {
+    if (f.rule !== "unreachable-params") return false;
+    const named = (f.message.match(/[a-z0-9_]+/g) || [])
+        .filter((w) => chain.some((p) => p.key === w));
+    return named.length > 0 && named.every((w) => DEVICE_HIDDEN.has(w));
+};
+
 let bad = 0;
 for (const f of r.findings) {
-    console.log(`[${f.level}] ${f.rule}: ${f.message}`);
-    if (f.level === "error" || f.level === "warn") bad++;
+    const level = isDeliberate(f) ? "info (deliberate)" : f.level;
+    console.log(`[${level}] ${f.rule}: ${f.message}`);
+    if (!isDeliberate(f) && (f.level === "error" || f.level === "warn")) bad++;
 }
 if (!r.findings.length) console.log("validator: clean");
 process.exit(bad ? 1 : 0);
