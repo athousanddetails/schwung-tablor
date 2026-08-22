@@ -426,11 +426,31 @@ function parseShape(str) {
   return { frames: nf, samples: ns, data: out };
 }
 
-/* The digests STREAM: they are declared in chain_params, so the manager
- * polls their values and pushes them like any other param. getParam is a
- * cache read in standalone mode -- it cannot ask the device -- so this
- * only harvests what has already streamed; the CTL entries below are the
- * real path and keep the display current as tables change. */
+/* Getting a fresh digest out of the device is not a read -- it is a NUDGE.
+ *
+ * A module web UI can never pull a value: getParam answers from the
+ * manager's cache in standalone mode, and the iframe path is the same
+ * (remote-ui.js handleIframeGetParam: "not currently supported by the WS
+ * protocol, so read from local state"). Values only ARRIVE, and they arrive
+ * on subscribe, on the notify ring, or on a 30 s refresh loop. The notify
+ * ring is driven by set_param traffic; the digest is rebuilt on the
+ * module's worker when a table lands, with no set_param behind it, so
+ * nothing ever notifies and the display sat 30 s stale.
+ *
+ * resubscribe() is the API's own escape hatch -- it makes the manager
+ * re-read every declared param from the device and push them. Repeating a
+ * subscribe is safe for this page: the parent guards custom_ui with
+ * `if (s.customUI[comp] === url) return;  // avoid reloading a live iframe`.
+ * Debounced, because a spin through tables should cost one re-read. */
+var nudgeTimer = null;
+function nudgeShapes(delay) {
+  if (!schwungRemote.resubscribe) return;
+  clearTimeout(nudgeTimer);
+  nudgeTimer = setTimeout(function () {
+    try { schwungRemote.resubscribe(); } catch (e) {}
+  }, delay || 400);
+}
+
 function ingestShape(osc, v) {
   var sh = parseShape(v);
   if (sh) { SHAPE[osc] = sh; redrawSoon(); }
@@ -504,13 +524,15 @@ function buildOsc(n) {
     var s = p.substring(p.lastIndexOf("/") + 1), d = s.lastIndexOf(".");
     e.textContent = d > 0 ? s.substring(0, d) : s;
   } };
-  /* the module rebuilds the digest on its worker, so re-read a beat after the
-   * path lands rather than racing it */
+  /* A path that changed under us -- the pot, or the device's own browser --
+   * means a new digest exists that nothing will push until the slow refresh.
+   * Ask for it. */
   var prevPath = null;
   var watch = CTL["wt" + n + "_table"].set;
   CTL["wt" + n + "_table"] = { set: function (p) {
     watch(p);
-    if (p !== prevPath) { prevPath = p; setTimeout(function () { fetchShape(n); }, 250); }
+    if (prevPath !== null && p !== prevPath) nudgeShapes(350);
+    prevPath = p;
   } };
 }
 
@@ -646,7 +668,7 @@ function buildPickers(cp) {
 
     ts.addEventListener("change", function () {
       send("wt" + n + "_select", ts.value);
-      setTimeout(function () { fetchShape(n); }, 300);
+      nudgeShapes(450);        /* let the worker load and digest it first */
     });
     ps.addEventListener("change", function () {
       packSels.forEach(function (o) { o.value = ps.value; });
