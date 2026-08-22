@@ -22,7 +22,8 @@ namespace tb {
 struct WtEntry {
     std::string name;     /* shown in the enum list: "Pack/Name" or "Name" */
     std::string path;     /* absolute; empty for the built-in Init         */
-    int flacFrameSize = 0;/* >0: .wtNNNN FLAC; 0: plain WAV                */
+    int flacFrameSize = 0;/* >0: frame size named by the .wtNNNN extension  */
+    bool flac = false;    /* a .wt* file: FLAC, whatever the number says    */
 };
 
 class WtScanner {
@@ -124,20 +125,28 @@ private:
             if (!dot) continue;
 
             int flacSize = 0;
+            bool isFlac = false;
             if (!strcasecmp(dot, ".wav")) {
                 /* plain WAV */
             } else if (!strncasecmp(dot, ".wt", 3)) {
-                flacSize = std::atoi(dot + 3);     /* .wt2048 etc (FLAC) */
-                if (flacSize < 256 || flacSize > 4096 ||
+                /* .wtNNNN is FLAC and NAMES its frame size. Take the number
+                 * when it is one wtBuild can use (32..4096, power of two) and
+                 * otherwise still list the file -- the loader infers the size
+                 * from the decoded length, the same as it does for a WAV.
+                 * The floor used to be 256, so a .wt64 was skipped entirely
+                 * and the file was invisible rather than merely unlabelled. */
+                flacSize = std::atoi(dot + 3);
+                if (flacSize < 32 || flacSize > 4096 ||
                     (flacSize & (flacSize - 1)) != 0)
-                    continue;
+                    flacSize = 0;
+                isFlac = true;
             } else {
                 continue;
             }
 
             std::string base(e->d_name, (size_t) (dot - e->d_name));
             entries.push_back({ prefix.empty() ? base : prefix + "/" + base,
-                                full, flacSize });
+                                full, flacSize, isFlac });
         }
         ::closedir(d);
     }

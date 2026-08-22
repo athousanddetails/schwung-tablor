@@ -172,10 +172,14 @@ private:
         float rate = 44100.0f;
         int frameSize = 0;
 
-        if (entry.flacFrameSize > 0) {
+        if (entry.flac || entry.flacFrameSize > 0) {
             if (!wtDecodeFlac(entry.path.c_str(), samples, rate))
                 return nullptr;
-            frameSize = entry.flacFrameSize;
+            frameSize = entry.flacFrameSize;       /* 0 = infer it below */
+            if (!frameSize) {
+                frameSize = wavInferFrameSizeForLength((int) samples.size());
+                if (!frameSize) frameSize = (int) samples.size();  /* one cycle */
+            }
         } else {
             WavData w;
             if (!wavLoad(entry.path.c_str(), w))

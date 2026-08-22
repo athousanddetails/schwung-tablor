@@ -313,7 +313,9 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path)
         int fs = atoi(dot + 3);
         /* 32, not 256: the same floor wtBuild accepts. A .wt64 was rejected
          * here, fell through to the WAV reader, failed to parse as WAV and
-         * loaded nothing at all. */
+         * loaded nothing at all. An unusable number leaves the size at 0 and
+         * the loader infers it -- the file is still FLAC either way. */
+        e.flac = true;
         if (fs >= 32 && fs <= 4096 && (fs & (fs - 1)) == 0)
             e.flacFrameSize = fs;
     }

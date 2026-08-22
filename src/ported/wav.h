@@ -109,15 +109,19 @@ inline bool wavIsPow2(int v) { return v > 0 && (v & (v - 1)) == 0; }
  * Returns 0 when no power-of-two cycle fits at all -- notably Adventure Kid's
  * own AKWF format, which is 600 samples per cycle. That is not a failure and
  * the caller must not treat it as one: see the resampling path in the loader. */
-inline int wavInferFrameSize(const WavData &w)
+inline int wavInferFrameSizeForLength(int n)
 {
-    if (w.clmFrameSize >= 32 && w.clmFrameSize <= 4096 && wavIsPow2(w.clmFrameSize))
-        return w.clmFrameSize;
-    const int n = (int) w.samples.size();
     for (int fs : { 2048, 1024, 512, 256, 128, 64, 32 })
         if (n >= fs && n % fs == 0)
             return fs;
     return 0;
+}
+
+inline int wavInferFrameSize(const WavData &w)
+{
+    if (w.clmFrameSize >= 32 && w.clmFrameSize <= 4096 && wavIsPow2(w.clmFrameSize))
+        return w.clmFrameSize;
+    return wavInferFrameSizeForLength((int) w.samples.size());
 }
 
 /* Resample every frame to `target` samples, linearly.
