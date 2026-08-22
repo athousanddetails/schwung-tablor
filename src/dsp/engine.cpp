@@ -1,5 +1,4 @@
 #include "engine.h"
-#include "trace.h"
 
 #include <cmath>
 #include <cstring>
@@ -85,9 +84,7 @@ void Engine::noteOn(int note, float vel)
             monoStack[monoStackLen++] = note;
 
         Voice &v = voices[0];
-        tbT(EV_NOTE_ON, note, (int) (vel * 127), 0, 1);
         if (v.isActive() && !v.isReleasing()) {
-            tbT(EV_V_RETRIG, 0, v.currentNote(), note);
             v.retrigger(c, note, vel);          /* legato / retrig path */
         } else {
             float from = glideOn ? lastPlayedNote : -1.0f;
@@ -106,27 +103,15 @@ void Engine::noteOn(int note, float vel)
         if (!v) return;
 
         float from = glideOn ? lastPlayedNote : -1.0f;
-        tbT(EV_NOTE_ON, note, (int) (vel * 127), (int) (v - voices.data()), 0);
-        if (v->isActive())
-            tbT(EV_V_STEAL, (int) (v - voices.data()), v->currentNote(), note);
         v->start(c, note, vel, ++serialCounter, from);
     }
 
-    if (note >= 0 && note < 128) {
-        /* Demand fresh evidence of zero pressure, but KEEP the armed flag: a
-         * host-manufactured duplicate note-on (see UPSTREAM-NOTES) is followed
-         * only by the tail of the real press's pressure stream, so clearing
-         * the flag here left exactly the stuck note this guards against. */
-        atValue[note] = 127;
-        atBlock[note] = blockCount;
-    }
     lastPlayedNote = (float) note;
 }
 
 void Engine::noteOff(int note)
 {
     const bool mono = (int) pots[TB_P_VOICE_MODE] == 1;
-    tbT(EV_NOTE_OFF, note, mono, sustainDown, monoStackLen);
 
     if (sustainDown) {
         if (note >= 0 && note < 128) sustained[note] = true;
@@ -155,7 +140,6 @@ void Engine::noteOff(int note)
                 VoiceContext c = makeContext(t1, t2);
                 v.retrigger(c, monoStack[monoStackLen - 1], 0.8f);
             } else if (!sustainDown) {
-                tbT(EV_OFF_STOP, note, 0, 0);
                 v.stop(true);
             } else {
                 sustained[note & 127] = true;
@@ -172,16 +156,11 @@ void Engine::noteOff(int note)
      * down the mono arm, which only ever looks at voices[0]. The rest of the
      * chord never got its note-off and sounded on until something stole the
      * voice: the "stuck note that clears when I play more notes" report. */
-    int hits = 0;
     for (size_t i = mono ? 1 : 0; i < voices.size(); i++) {
         Voice &v = voices[i];
-        if (v.isActive() && !v.isReleasing() && v.currentNote() == note) {
-            tbT(EV_OFF_STOP, note, (int) i, 1);
+        if (v.isActive() && !v.isReleasing() && v.currentNote() == note)
             v.stop(true);
-            hits++;
-        }
     }
-    if (!hits) tbT(EV_OFF_NOMATCH, note, mono);
 }
 
 void Engine::allNotesOff(bool allowTail)
@@ -211,7 +190,6 @@ void Engine::onMidi(const uint8_t *msg, int len)
             case 1:  modWheel = (float) msg[2] / 127.0f; break;
             case 64: {
                 bool down = msg[2] >= 64;
-                tbT(EV_CC, 64, msg[2]);
                 if (sustainDown && !down) {
                     /* release everything that was sustained */
                     for (int n = 0; n < 128; n++) {
@@ -227,24 +205,9 @@ void Engine::onMidi(const uint8_t *msg, int len)
                 break;
             }
             case 120: case 123:
-                tbT(EV_CC, msg[1], msg[2]);
                 allNotesOff(msg[1] == 123);
                 break;
             }
-        }
-        break;
-    case 0xA0:                       /* poly aftertouch: Move's pad pressure */
-        if (len >= 3) {
-            int n = msg[1] & 127;
-            atValue[n] = msg[2];
-            atBlock[n] = blockCount;
-            /* Armed only by real pressure. A controller that opens with a
-             * zero-pressure message must not arm the watchdog, or its note
-             * would be released while the finger is still down. */
-            if (msg[2] > 0) atArmed[n] = true;
-            /* highest pad pressure also drives the aftertouch mod source, so
-             * poly AT is not merely swallowed */
-            aftertouch = (float) msg[2] / 127.0f;
         }
         break;
     case 0xD0:
@@ -276,30 +239,6 @@ void Engine::renderBlock(int16_t *out, int frames)
         for (auto &v : voices)
             if (v.isActive())
                 v.render(c, L, R, n);
-
-        /* A held pad whose pressure hit zero and then stopped reporting is a
-         * finger that left without a note-off arriving. Release it. */
-        blockCount++;
-        for (auto &v : voices) {
-            if (!v.isActive() || v.isReleasing()) continue;
-            int nn = v.currentNote();
-            if (nn < 0 || nn > 127 || !atArmed[nn]) continue;
-            if (atValue[nn] != 0) continue;
-            if (blockCount - atBlock[nn] < kPadGoneBlocks) continue;
-            tbT(EV_PAD_GONE, nn, (int) (blockCount - atBlock[nn]));
-            atArmed[nn] = false;
-            noteOff(nn);
-        }
-
-        /* every ~250 ms, one line per still-active voice: a voice that keeps
-         * appearing here with no matching note-off IS the stuck note */
-        if (++snapCounter >= 86) {
-            snapCounter = 0;
-            for (size_t i = 0; i < voices.size(); i++)
-                if (voices[i].isActive())
-                    tbT(EV_SNAP, (int) i, voices[i].currentNote(),
-                        voices[i].adsrState(), (int) (voices[i].envOutput() * 1000));
-        }
 
         const float master = potSquared(pots[TB_P_VOLUME]) * 0.8f;
         for (int i = 0; i < n; i++) {

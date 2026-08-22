@@ -341,60 +341,6 @@ int main(int argc, char **argv)
     api->on_midi(inst, all_off, 3, 0);
     api->set_param(inst, "wt1_table", "");
 
-    /* ---- lost note-off: the pad-pressure watchdog ----
-     * Traced on hardware: the host sometimes never delivers a note-off at
-     * all (one missing off in a session, always while an encoder is being
-     * turned). The note-on and the whole poly-aftertouch decay arrive; the
-     * note-off does not. A note whose pressure reached zero and then went
-     * silent is a finger that is gone. */
-    api->set_param(inst, "voice_mode", "Poly");
-    api->set_param(inst, "vca_r", "5");
-    api->set_param(inst, "vca_s", "100");
-    {
-        uint8_t on[3] = { 0x90, 62, 100 };
-        api->on_midi(inst, on, 3, 0);
-        for (int b = 0; b < 30; b++) api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
-
-        /* pressure rises, then decays to zero -- and NO note-off ever comes */
-        const uint8_t press[8] = { 20, 30, 40, 35, 20, 9, 1, 0 };
-        for (int i = 0; i < 8; i++) {
-            uint8_t at[3] = { 0xA0, 62, press[i] };
-            api->on_midi(inst, at, 3, 0);
-            for (int b = 0; b < 10; b++) api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
-        }
-        /* the watchdog waits ~1.5 s (517 blocks) before it calls the finger
-         * gone, so give it that plus the release before listening */
-        for (int b = 0; b < 620; b++) api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
-        long tail = 0;
-        for (int b = 0; b < 500; b++) {          /* ~1.45 s of pure listening */
-            api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
-            for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
-                long v = out[i] < 0 ? -out[i] : out[i];
-                if (v > tail) tail = v;
-            }
-        }
-        CHECK(tail < 40, "a note whose pad pressure died is released even with "
-              "no note-off (tail peak %ld)", tail);
-
-        /* and the watchdog must NOT fire while the finger is still down */
-        api->on_midi(inst, on, 3, 0);
-        long heldPeak = 0;
-        for (int r = 0; r < 40; r++) {
-            uint8_t at[3] = { 0xA0, 62, 40 };     /* steady pressure */
-            api->on_midi(inst, at, 3, 0);
-            for (int b = 0; b < 50; b++) {
-                api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
-                for (size_t i = 0; i < MOVE_FRAMES_PER_BLOCK * 2; i++) {
-                    long v = out[i] < 0 ? -out[i] : out[i];
-                    if (v > heldPeak) heldPeak = v;
-                }
-            }
-        }
-        CHECK(heldPeak > 500, "a held pad keeps sounding (peak %ld)", heldPeak);
-        api->on_midi(inst, all_off, 3, 0);
-        for (int b = 0; b < 100; b++) api->render_block(inst, out, MOVE_FRAMES_PER_BLOCK);
-    }
-
     /* ---- a note-off must release its voice whatever mode we are in NOW ----
      * Reported from hardware as a note that keeps sounding until you play
      * more notes (which is voice STEALING, not a release). Flipping to Mono

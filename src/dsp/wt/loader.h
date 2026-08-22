@@ -15,11 +15,9 @@
 #include "../engine.h"
 #include "../../ported/wav.h"
 #include "../rt.h"
-#include "../trace.h"
 
 #include <functional>
 
-#include <chrono>
 #include <condition_variable>
 #include <map>
 #include <mutex>
@@ -33,10 +31,6 @@ bool wtDecodeFlac(const char *path, std::vector<float> &samples,
 
 class WtLoader {
 public:
-    /* TB_TRACE only: where the worker spills the ring */
-    static constexpr const char *kTracePath =
-        "/data/UserData/schwung/tablor-trace.log";
-
     /* ~24 MB per oscillator: frames are subsampled to fit if a pathological
      * table would blow past it (PLAN 5.4). ~12,384 samples/frame decimated. */
     static constexpr size_t kMaxBytesPerTable = 24u * 1024 * 1024;
@@ -105,21 +99,17 @@ private:
             std::function<void()> job;
             {
                 std::unique_lock<std::mutex> lk(m);
-                /* timed, so the trace gets drained on a quiet worker too --
-                 * the interesting runs are the ones where nothing loads */
-                cv.wait_for(lk, std::chrono::milliseconds(200), [this] {
+                cv.wait(lk, [this] {
                     return quit || hasPending[0] || hasPending[1] || !jobs.empty();
                 });
-                if (!quit) {
-                    lk.unlock();
-                    tbTraceDrain(kTracePath);
-                    lk.lock();
-                }
                 if (quit) return;
                 if (!jobs.empty()) {            /* plain jobs first (init) */
                     job = std::move(jobs.front());
                     jobs.erase(jobs.begin());
                 }
+                /* No settle delay: a table change loads the instant the pot
+                 * moves. Deferring it to coalesce a fast spin was tried and
+                 * rejected -- the lag is the whole feel of the control. */
                 for (int i = 0; i < 2 && !job; i++) {
                     if (hasPending[i]) {
                         entry = pending[i];
