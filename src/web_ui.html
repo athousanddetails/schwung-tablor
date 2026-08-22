@@ -2,211 +2,578 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tablor</title>
 <style>
-  /* Dark sectioned panel in the spirit of the original Wavetable plugin
-   * (SocaLabs): near-black ground, one boxed panel per section, amber
-   * accents. Layout is generated from ui_pages.json, the same single
-   * source as the hardware pages. */
-  :root {
-    --bg: #101114; --panel: #17181d; --edge: #2a2c34;
-    --txt: #d8dae0; --dim: #7c8090; --acc: #e8a33d; --acc2: #5fb0c9;
-  }
-  * { box-sizing: border-box; }
-  body {
-    background: var(--bg); color: var(--txt); margin: 0; padding: 10px;
-    font: 12px/1.35 system-ui, -apple-system, sans-serif;
-  }
-  h1 {
-    font-size: 15px; letter-spacing: .35em; margin: 2px 4px 10px;
-    color: var(--acc); font-weight: 700;
-  }
-  h1 small { color: var(--dim); letter-spacing: .1em; font-weight: 400; margin-left: 8px; }
-  #panels { display: flex; flex-wrap: wrap; gap: 8px; }
-  .panel {
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 6px;
-    padding: 8px 10px 6px; flex: 1 1 260px; min-width: 240px;
-  }
-  .panel h2 {
-    font-size: 10px; letter-spacing: .25em; color: var(--acc);
-    margin: 0 0 6px; text-transform: uppercase; font-weight: 600;
-    border-bottom: 1px solid var(--edge); padding-bottom: 4px;
-  }
-  .panel.global h2, .panel.user h2 { color: var(--acc2); }
-  .ctl { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
-  .ctl label { width: 92px; color: var(--dim); flex: none;
-               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ctl output { width: 34px; text-align: right; color: var(--txt); flex: none;
-                font-variant-numeric: tabular-nums; }
-  input[type=range] { flex: 1; accent-color: var(--acc); height: 18px; min-width: 60px; }
-  select {
-    flex: 1; background: #0c0d10; color: var(--txt); border: 1px solid var(--edge);
-    border-radius: 4px; padding: 2px 4px; font-size: 11px; min-width: 60px;
-  }
-  .file {
-    flex: 1; background: #0c0d10; border: 1px dashed var(--edge); border-radius: 4px;
-    padding: 3px 6px; color: var(--acc2); font-size: 11px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .note { color: var(--dim); margin: 8px 4px 0; font-size: 11px; }
+/* Laid out after the original Wavetable plugin (SocaLabs / Roland Rabien,
+ * reference/wavetable/Screenshots): near-black ground, one boxed panel per
+ * section with a lighter title bar, real knobs with an amber value arc, and
+ * the curve displays sitting inside the panel they belong to.
+ *
+ * The CONTROLS are ours — no FX row, no step sequencer, plus the macro bank
+ * Tablor adds. Ranges, option names and page grouping all come from
+ * ui_pages.json, the same file the hardware pages are generated from, so this
+ * cannot drift from the device. */
+:root{
+  --bg:#0e1013; --panel:#191b20; --bar:#23262c; --edge:#2e323a;
+  --txt:#c3c8d1; --dim:#767c88; --acc:#d2884f; --acc-d:#8a5a37;
+  --wave:#4fd06a; --wave-hi:#e8e04a;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--txt); margin:0; padding:8px;
+  font:11px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+/* ---- top bar ---- */
+#top{
+  display:flex; align-items:center; gap:10px; background:var(--bar);
+  border:1px solid var(--edge); border-radius:5px; padding:6px 10px; margin-bottom:6px;
+}
+#top .brand{font-size:13px; letter-spacing:.34em; font-weight:700; color:var(--txt)}
+#top .brand small{color:var(--dim); letter-spacing:.08em; font-weight:400; margin-left:8px; font-size:10px}
+#presetbar{display:flex; align-items:center; gap:4px; flex:1; justify-content:center}
+#presetname{
+  min-width:180px; max-width:340px; text-align:center; color:var(--acc);
+  background:#0d0f12; border:1px solid var(--edge); border-radius:12px;
+  padding:3px 14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+button.step{
+  background:transparent; color:var(--dim); border:1px solid var(--edge);
+  border-radius:11px; width:22px; height:22px; cursor:pointer; line-height:1;
+}
+button.step:hover{color:var(--acc); border-color:var(--acc-d)}
+button.act{
+  background:transparent; color:var(--acc); border:1px solid var(--acc-d);
+  border-radius:11px; padding:3px 12px; cursor:pointer;
+}
+button.act:hover{background:#241a12}
+input.rename{
+  background:#0d0f12; color:var(--txt); border:1px solid var(--edge);
+  border-radius:11px; padding:3px 10px; width:120px; font-size:11px;
+}
+/* ---- rack ---- */
+#rack{display:grid; grid-template-columns:repeat(12,1fr); gap:6px; align-items:start}
+.panel{
+  background:var(--panel); border:1px solid var(--edge); border-radius:5px;
+  display:flex; flex-direction:column; overflow:hidden; min-width:0;
+}
+.panel > .bar{
+  background:var(--bar); border-bottom:1px solid var(--edge);
+  padding:5px 9px; display:flex; align-items:center; gap:8px;
+  font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:var(--dim);
+}
+.panel > .bar .dot{width:7px; height:7px; border-radius:50%; background:var(--acc-d); flex:none}
+.panel > .bar .name{
+  color:var(--acc); letter-spacing:.12em; text-transform:none; font-size:11px;
+  margin-left:auto; max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.body{padding:8px 9px 9px; display:flex; gap:10px; flex:1; min-width:0}
+.col{display:flex; flex-direction:column; gap:8px; min-width:0}
+.knobs{display:flex; gap:2px; flex-wrap:wrap}
+/* ---- knob ---- */
+.knob{width:52px; text-align:center; flex:none; user-select:none}
+.knob svg{display:block; margin:0 auto; cursor:ns-resize; touch-action:none}
+.knob .lab{color:var(--dim); font-size:10px; margin-top:1px;
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.knob .val{color:var(--acc); font-size:10px; height:11px; visibility:hidden;
+           font-variant-numeric:tabular-nums}
+.knob:hover .val,.knob.live .val{visibility:visible}
+.knob:hover .lab,.knob.live .lab{visibility:hidden}
+.knob .stack{position:relative; height:11px; margin-top:1px}
+.knob .stack > *{position:absolute; left:0; right:0; top:0}
+/* ---- enum pill ---- */
+.pill{width:76px; text-align:center; flex:none}
+.pill select{
+  width:100%; appearance:none; -webkit-appearance:none; text-align:center;
+  background:#0d0f12; color:var(--acc); border:1px solid var(--edge);
+  border-radius:10px; padding:3px 4px; font-size:10px; cursor:pointer;
+  text-overflow:ellipsis;
+}
+.pill select:hover{border-color:var(--acc-d)}
+.pill .lab{color:var(--dim); font-size:10px; margin-top:2px}
+/* ---- displays ---- */
+canvas.disp{
+  background:#0a0b0d; border:1px solid #23262c; border-radius:3px;
+  display:block; width:100%; flex:none; min-width:0;
+}
+/* ---- mod + macro rows ---- */
+.row{display:flex; align-items:center; gap:5px; margin-bottom:4px}
+.row .n{color:var(--dim); width:14px; flex:none; text-align:right}
+.row .pill{width:auto; flex:1 1 0; min-width:0; max-width:150px}
+.row .pill.sw{flex:0 0 46px; max-width:46px}
+.row .pill .lab{display:none}
+.arrow{color:var(--dim); flex:none}
+.macro{width:88px; flex:none; display:flex; flex-direction:column; align-items:center; gap:2px}
+.macro .pill{width:84px}
+.hint{color:var(--dim); font-size:10px; padding:2px 9px 8px}
+/* ---- spans ---- */
+.s2{grid-column:span 2}.s3{grid-column:span 3}.s4{grid-column:span 4}
+.s6{grid-column:span 6}.s8{grid-column:span 8}.s12{grid-column:span 12}
+@media (max-width:1240px){
+  .s2,.s3,.s4{grid-column:span 6}.s6,.s8{grid-column:span 12}
+}
+@media (max-width:640px){ .s2,.s3,.s4,.s6,.s8{grid-column:span 12} }
 </style>
 </head>
 <body>
-  <h1>TABLOR<small>2-osc wavetable &middot; Schwung</small></h1>
-  <div id="panels"></div>
-  <p class="note">Wavetable picking happens on the device (OSC page, knobs 1/2
-  step tables; click to browse with live preview). Everything else is live in
-  both directions.</p>
+
+<div id="top">
+  <div class="brand">TABLOR<small>2-osc wavetable</small></div>
+  <div id="presetbar">
+    <button class="step" id="pprev" title="Previous preset">&lsaquo;</button>
+    <div id="presetname">Init</div>
+    <button class="step" id="pnext" title="Next preset">&rsaquo;</button>
+    <input class="rename" id="pname" maxlength="14" placeholder="rename…">
+    <button class="act" id="prename">Rename</button>
+    <button class="act" id="psave">Save</button>
+  </div>
+</div>
+
+<div id="rack"></div>
 
 <script src="/static/schwung-remote-api.js"></script>
 <script>
 (function () {
-  "use strict";
-  var K = "synth:";
-  var controls = {};   /* key -> {set(valueString)} */
+"use strict";
 
-  function baseName(path) {
-    if (!path) return "Init (built-in)";
-    var n = path.substring(path.lastIndexOf("/") + 1);
-    var d = n.lastIndexOf(".");
-    return d > 0 ? n.substring(0, d) : n;
+var K = "synth:";
+var META = {};      /* key -> slot from ui_pages.json */
+var CTL  = {};      /* key -> { set(valueString) }    */
+var VAL  = {};      /* key -> current numeric/string  */
+var placed = {};
+
+function send(key, v) { schwungRemote.setParam(K + key, String(v)); }
+function el(tag, cls, parent) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+/* ------------------------------------------------------------------ knob */
+/* -135deg .. +135deg, amber arc from the minimum, grey pointer. Drag
+ * vertically; 160 px covers the range, Shift for fine. */
+var A0 = -135, A1 = 135, R = 16;
+
+function polar(cx, cy, r, deg) {
+  var a = (deg - 90) * Math.PI / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+function arcPath(cx, cy, r, from, to) {
+  var p0 = polar(cx, cy, r, from), p1 = polar(cx, cy, r, to);
+  var big = Math.abs(to - from) > 180 ? 1 : 0;
+  return "M" + p0[0].toFixed(2) + "," + p0[1].toFixed(2) +
+         "A" + r + "," + r + " 0 " + big + " 1 " + p1[0].toFixed(2) + "," + p1[1].toFixed(2);
+}
+
+function makeKnob(slot, label, into) {
+  var min = slot.min, max = slot.max, span = (max - min) || 1;
+  var wrap = el("div", "knob", into);
+  var NS = "http://www.w3.org/2000/svg";
+  var svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("width", 44); svg.setAttribute("height", 44);
+  svg.setAttribute("viewBox", "0 0 44 44");
+  wrap.appendChild(svg);
+
+  function node(t, attrs) {
+    var n = document.createElementNS(NS, t);
+    for (var a in attrs) n.setAttribute(a, attrs[a]);
+    svg.appendChild(n);
+    return n;
+  }
+  node("circle", { cx: 22, cy: 22, r: 13, fill: "#2b2e35", stroke: "#3a3e46" });
+  node("path", { d: arcPath(22, 22, R, A0, A1), stroke: "#33373e",
+                 "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
+  var arc = node("path", { stroke: "var(--acc)", "stroke-width": 3, fill: "none",
+                           "stroke-linecap": "round" });
+  var ptr = node("line", { stroke: "#a2a8b3", "stroke-width": 2.5,
+                           "stroke-linecap": "round" });
+
+  var stack = el("div", "stack", wrap);
+  var lab = el("div", "lab", stack); lab.textContent = label;
+  var out = el("div", "val", stack);
+  wrap.title = slot.full + "  (" + slot.k + ")";
+
+  var v = min;
+  function paint() {
+    var f = (v - min) / span, deg = A0 + f * (A1 - A0);
+    arc.setAttribute("d", f <= 0.001 ? "" : arcPath(22, 22, R, A0, deg));
+    var a = polar(22, 22, 12.5, deg), b = polar(22, 22, 5, deg);
+    ptr.setAttribute("x1", b[0]); ptr.setAttribute("y1", b[1]);
+    ptr.setAttribute("x2", a[0]); ptr.setAttribute("y2", a[1]);
+    out.textContent = Math.round(v);
+  }
+  function setLocal(nv, push) {
+    nv = Math.max(min, Math.min(max, nv));
+    if (nv === v) return;
+    v = nv; VAL[slot.k] = v; paint(); redrawSoon();
+    if (push) send(slot.k, Math.round(v));
   }
 
-  function makeControl(slot, into) {
-    var row = document.createElement("div");
-    row.className = "ctl";
-    var lab = document.createElement("label");
-    lab.textContent = slot.full.replace(/^(WT\d|LFO\d|Mod\d|Macro \d) /, "");
-    lab.title = slot.full + " (" + slot.k + ")";
-    row.appendChild(lab);
-
-    if (slot.k === "preset") {
-      /* unlimited user presets -> live stepping, not a static dropdown */
-      var wrap = document.createElement("div");
-      wrap.style.cssText = "flex:1;display:flex;gap:6px;align-items:center";
-      var prev = document.createElement("button");
-      var next = document.createElement("button");
-      prev.textContent = "‹"; next.textContent = "›";
-      prev.style.cssText = next.style.cssText =
-        "background:#0c0d10;color:var(--txt);border:1px solid var(--edge);" +
-        "border-radius:4px;width:26px;cursor:pointer";
-      var nameEl = document.createElement("div");
-      nameEl.className = "file";
-      nameEl.textContent = "Init";
-      var idx = 0;
-      prev.addEventListener("click", function () {
-        schwungRemote.setParam(K + "preset", String(Math.max(0, idx - 1)));
-      });
-      next.addEventListener("click", function () {
-        schwungRemote.setParam(K + "preset", String(idx + 1));
-      });
-      wrap.appendChild(prev); wrap.appendChild(nameEl); wrap.appendChild(next);
-      row.appendChild(wrap);
-      controls[slot.k] = { set: function (v) { idx = parseInt(v, 10) || 0; } };
-      schwungRemote.onParamChange(function (params) {
-        if (params[K + "preset_name"] !== undefined)
-          nameEl.textContent = params[K + "preset_name"] || "Init";
-      });
-    } else if (slot.b === "trigger") {
-      var btn = document.createElement("button");
-      btn.textContent = "Save";
-      btn.style.cssText = "flex:1;background:var(--acc);color:#111;border:0;" +
-        "border-radius:4px;padding:4px;font-weight:600;cursor:pointer";
-      btn.addEventListener("click", function () {
-        schwungRemote.setParam(K + slot.k, "1");
-        btn.textContent = "Saved ✓";
-        setTimeout(function () { btn.textContent = "Save"; }, 1200);
-      });
-      row.appendChild(btn);
-      controls[slot.k] = { set: function () {} };
-    } else if (slot.t === "file") {
-      var f = document.createElement("div");
-      f.className = "file";
-      f.textContent = "Init (built-in)";
-      row.appendChild(f);
-      controls[slot.k] = { set: function (v) { f.textContent = baseName(v); } };
-    } else if (slot.t === "enum") {
-      var sel = document.createElement("select");
-      slot.options.forEach(function (o, i) {
-        var op = document.createElement("option");
-        op.value = String(i);
-        op.textContent = o;
-        sel.appendChild(op);
-      });
-      sel.addEventListener("change", function () {
-        schwungRemote.setParam(K + slot.k, sel.value);
-      });
-      row.appendChild(sel);
-      controls[slot.k] = { set: function (v) {
-        var i = slot.options.indexOf(v);
-        sel.value = String(i >= 0 ? i : (parseInt(v, 10) || 0));
-      } };
-    } else {
-      var r = document.createElement("input");
-      r.type = "range";
-      r.min = slot.min; r.max = slot.max; r.step = 1;
-      var out = document.createElement("output");
-      r.addEventListener("input", function () {
-        out.value = r.value;
-        schwungRemote.setParam(K + slot.k, r.value);
-      });
-      row.appendChild(r);
-      row.appendChild(out);
-      controls[slot.k] = { set: function (v) {
-        r.value = v; out.value = Math.round(parseFloat(v) || 0);
-      } };
-    }
-    into.appendChild(row);
+  /* Drag state is a plain flag with document-level listeners for the pointer's
+   * lifetime, not pointer capture: capture is the nicer API but it throws or
+   * silently no-ops in enough embedded web views that keying the handler off
+   * hasPointerCapture would leave every knob dead in exactly the browser this
+   * page has to work in. Capture is still requested, just never depended on. */
+  var dragY = 0, dragV = 0, dragging = false;
+  function onMove(e) {
+    if (!dragging) return;
+    var k = e.shiftKey ? 4 : 1;
+    setLocal(Math.round(dragV + (dragY - e.clientY) * (span / 160) / k), true);
+    e.preventDefault();
   }
-
-  fetch("ui_pages.json").then(function (r) { return r.json(); }).then(function (data) {
-    var root = document.getElementById("panels");
-    data.pages.forEach(function (page) {
-      var p = document.createElement("div");
-      p.className = "panel " + page.sec.toLowerCase().replace(/[^a-z]/g, "");
-      var h = document.createElement("h2");
-      h.textContent = page.name;
-      p.appendChild(h);
-      page.slots.forEach(function (s) { if (s) makeControl(s, p); });
-      root.appendChild(p);
-    });
-
-    /* rename box in the Preset panel: renames the CURRENT User slot */
-    var presetPanel = root.querySelector(".panel.preset");
-    if (presetPanel) {
-      var row = document.createElement("div");
-      row.className = "ctl";
-      var lab = document.createElement("label");
-      lab.textContent = "Name";
-      var inp = document.createElement("input");
-      inp.type = "text";
-      inp.maxLength = 14;
-      inp.style.cssText = "flex:1;background:#0c0d10;color:var(--txt);" +
-        "border:1px solid var(--edge);border-radius:4px;padding:3px 6px;font-size:11px";
-      var ok = document.createElement("button");
-      ok.textContent = "Rename";
-      ok.style.cssText = "background:var(--acc2);color:#111;border:0;" +
-        "border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer";
-      ok.addEventListener("click", function () {
-        if (inp.value.trim())
-          schwungRemote.setParam(K + "preset_name", inp.value.trim());
-      });
-      row.appendChild(lab); row.appendChild(inp); row.appendChild(ok);
-      presetPanel.appendChild(row);
-      schwungRemote.onParamChange(function (params) {
-        if (params[K + "preset_name"] !== undefined)
-          inp.placeholder = params[K + "preset_name"];
-      });
-    }
-
-    schwungRemote.onParamChange(function (params) {
-      for (var key in params) {
-        if (key.indexOf(K) !== 0) continue;
-        var c = controls[key.substring(K.length)];
-        if (c) c.set(params[key]);
-      }
-    });
+  function end() {
+    if (!dragging) return;
+    dragging = false;
+    wrap.classList.remove("live");
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", end);
+    document.removeEventListener("pointercancel", end);
+  }
+  svg.addEventListener("pointerdown", function (e) {
+    dragging = true; dragY = e.clientY; dragV = v;
+    wrap.classList.add("live");
+    try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
+    e.preventDefault();
   });
+  svg.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    setLocal(v + (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 1 : Math.max(1, Math.round(span / 64))), true);
+  }, { passive: false });
+
+  paint();
+  CTL[slot.k] = { set: function (s) {
+    var nv = parseFloat(s); if (isNaN(nv)) return;
+    v = Math.max(min, Math.min(max, nv)); VAL[slot.k] = v; paint(); redrawSoon();
+  } };
+}
+
+/* ------------------------------------------------------------------ enum */
+function makePill(slot, label, into, cls) {
+  var wrap = el("div", "pill" + (cls ? " " + cls : ""), into);
+  var sel = el("select", null, wrap);
+  wrap.title = slot.full + "  (" + slot.k + ")";
+  slot.options.forEach(function (o, i) {
+    var op = el("option", null, sel); op.value = String(i); op.textContent = o;
+  });
+  sel.addEventListener("change", function () {
+    VAL[slot.k] = parseInt(sel.value, 10); send(slot.k, sel.value); redrawSoon();
+  });
+  if (label) { var l = el("div", "lab", wrap); l.textContent = label; }
+  CTL[slot.k] = { set: function (s) {
+    var i = slot.options.indexOf(s);
+    if (i < 0) { i = parseInt(s, 10); if (isNaN(i)) return; }
+    sel.value = String(i); VAL[slot.k] = i; redrawSoon();
+  } };
+}
+
+/* ------------------------------------------------------- generic control */
+function control(key, label, into, cls) {
+  var slot = META[key];
+  if (!slot) return;
+  placed[key] = 1;
+  if (slot.t === "int") makeKnob(slot, label || slot.n, into);
+  else if (slot.t === "enum") makePill(slot, label, into, cls);
+}
+function controls(keys, into) {
+  keys.forEach(function (spec) {
+    if (typeof spec === "string") control(spec, null, into);
+    else control(spec[0], spec[1], into);
+  });
+}
+
+/* -------------------------------------------------------------- displays */
+var canvases = [];
+function addCanvas(into, draw, h) {
+  var c = el("canvas", "disp", into);
+  c.style.height = (h || 72) + "px";
+  canvases.push({ c: c, draw: draw });
+  return c;
+}
+var pending = false;
+function redrawSoon() {
+  if (pending) return;
+  pending = true;
+  requestAnimationFrame(function () { pending = false; drawAll(); });
+}
+function drawAll() {
+  canvases.forEach(function (o) {
+    var c = o.c, dpr = window.devicePixelRatio || 1;
+    var w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return;
+    if (c.width !== w * dpr || c.height !== h * dpr) {
+      c.width = w * dpr; c.height = h * dpr;
+    }
+    var g = c.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    o.draw(g, w, h);
+  });
+}
+window.addEventListener("resize", redrawSoon);
+
+function num(key, dflt) {
+  var v = VAL[key];
+  return (v === undefined || v === null || isNaN(v)) ? (dflt || 0) : v;
+}
+function frac(key) {
+  var s = META[key];
+  if (!s || s.t !== "int") return 0;
+  var span = (s.max - s.min) || 1;
+  return (num(key, s.min) - s.min) / span;
+}
+
+/* ADSR, exactly as the original draws it: line with round handles. */
+function drawAdsr(a, d, s, r) {
+  return function (g, w, h) {
+    var pad = 8, x0 = pad, x1 = w - pad, y0 = pad, y1 = h - pad;
+    var fa = frac(a), fd = frac(d), fr = frac(r), fs = frac(s);
+    var tot = fa + fd + fr + 0.9;
+    var xa = x0 + (x1 - x0) * (fa / tot);
+    var xd = xa + (x1 - x0) * (fd / tot);
+    var xs = xd + (x1 - x0) * (0.9 / tot);
+    var ys = y1 - (y1 - y0) * fs;
+    g.strokeStyle = "#c8834f"; g.lineWidth = 1.5; g.lineJoin = "round";
+    g.beginPath();
+    g.moveTo(x0, y1); g.lineTo(xa, y0); g.lineTo(xd, ys); g.lineTo(xs, ys); g.lineTo(x1, y1);
+    g.stroke();
+    [[xa, y0], [xd, ys], [x1, y1]].forEach(function (p) {
+      g.beginPath(); g.arc(p[0], p[1], 3, 0, 7);
+      g.fillStyle = "#0a0b0d"; g.fill();
+      g.strokeStyle = "#e6e9ee"; g.lineWidth = 1.4; g.stroke();
+    });
+  };
+}
+
+/* LFO: the selected shape, one cycle, scaled by depth and offset. */
+function drawLfo(shape, depth, offset, phase) {
+  return function (g, w, h) {
+    var pad = 8, x0 = pad, x1 = w - pad, mid = h / 2;
+    var amp = (h / 2 - pad) * (depth ? frac(depth) : 1);
+    var off = offset ? (frac(offset) * 2 - 1) : 0;
+    var ph = phase ? frac(phase) : 0;
+    var name = (META[shape] && META[shape].options[num(shape, 0)]) || "Sine";
+    function y(t) {
+      var u = (t + ph) % 1, v;
+      switch (name) {
+        case "Triangle": v = u < .5 ? (u * 4 - 1) : (3 - u * 4); break;
+        case "Saw Up":   v = u * 2 - 1; break;
+        case "Saw Down": v = 1 - u * 2; break;
+        case "Square":   v = u < .5 ? 1 : -1; break;
+        case "Square+":  v = u < .5 ? 1 : 0; break;
+        case "S&H":      v = Math.sin((Math.floor(u * 8) + 1) * 12.9898) ; break;
+        case "Noise":    v = Math.sin((Math.floor(u * 64) + 1) * 78.233); break;
+        default:         v = Math.sin(u * 2 * Math.PI);
+      }
+      return mid - (v + off) * amp;
+    }
+    g.strokeStyle = "#c8834f"; g.lineWidth = 1.5; g.beginPath();
+    for (var i = 0; i <= 128; i++) {
+      var x = x0 + (x1 - x0) * (i / 128), yy = y(i / 128);
+      i ? g.lineTo(x, yy) : g.moveTo(x, yy);
+    }
+    g.stroke();
+    g.strokeStyle = "#23262c"; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x0, mid); g.lineTo(x1, mid); g.stroke();
+  };
+}
+
+/* Wavetable waterfall. INDICATIVE, not the file: the module does not publish
+ * table data over the remote API, so the frames here are a generated shape
+ * that responds to Pos / Bend / Formant. The highlighted line is the frame
+ * Pos selects, which is the part that actually tells you something. */
+function drawWaterfall(pos, bend, formant) {
+  return function (g, w, h) {
+    var rows = 26, pad = 6;
+    var fp = frac(pos), fb = bend ? frac(bend) * 2 - 1 : 0, ff = formant ? frac(formant) : .5;
+    var cur = Math.round(fp * (rows - 1));
+    for (var i = 0; i < rows; i++) {
+      var t = i / (rows - 1);
+      var y = pad + (h - pad * 2) * (0.18 + t * 0.82);
+      var xs = pad + (h - pad * 2) * (1 - t) * 0.30;
+      var amp = (h - pad * 2) * 0.18 * (0.45 + t * 0.55);
+      g.beginPath();
+      for (var x = 0; x <= 64; x++) {
+        var u = x / 64;
+        var harm = 1 + Math.floor(t * 5) + ff * 3;
+        var v = Math.sin(u * 2 * Math.PI * harm + fb * 3 * u) *
+                Math.pow(Math.sin(Math.PI * u), 0.6 + t);
+        var px = xs + (w - pad - xs) * u, py = y - v * amp;
+        x ? g.lineTo(px, py) : g.moveTo(px, py);
+      }
+      if (i === cur) { g.strokeStyle = "#e8e04a"; g.lineWidth = 1.6; }
+      else { g.strokeStyle = "rgba(79,208,106," + (0.13 + t * 0.5).toFixed(2) + ")"; g.lineWidth = 1; }
+      g.stroke();
+    }
+  };
+}
+
+/* ---------------------------------------------------------------- panels */
+function panel(cls, title, nameEl) {
+  var p = el("div", "panel " + cls, document.getElementById("rack"));
+  var bar = el("div", "bar", p);
+  el("div", "dot", bar);
+  var t = el("div", null, bar); t.textContent = title;
+  if (nameEl) { var n = el("div", "name", bar); n.id = nameEl; n.textContent = "Init"; }
+  return el("div", "body", p);
+}
+
+function buildOsc(n) {
+  var b = panel("s6", "OSC " + n, "wtname" + n);
+  var left = el("div", "col", b);
+  var r1 = el("div", "knobs", left), r2 = el("div", "knobs", left);
+  controls([["wt" + n + "_pos", "Pos"], ["wt" + n + "_tune", "Tune"],
+            ["wt" + n + "_level", "Level"], ["wt" + n + "_pan", "Pan"]], r1);
+  controls([["wt" + n + "_uni", "Unison"], ["wt" + n + "_detune", "Detune"],
+            ["wt" + n + "_spread", "Spread"], ["wt" + n + "_formant", "Formant"],
+            ["wt" + n + "_bend", "Bend"]], r2);
+  var right = el("div", "col", b);
+  right.style.flex = "1"; right.style.minWidth = "0";
+  addCanvas(right, drawWaterfall("wt" + n + "_pos", "wt" + n + "_bend", "wt" + n + "_formant"), 104);
+  placed["wt" + n + "_table"] = 1;
+  CTL["wt" + n + "_table"] = { set: function (p) {
+    var e = document.getElementById("wtname" + n);
+    if (!e) return;
+    if (!p) { e.textContent = "Init"; return; }
+    var s = p.substring(p.lastIndexOf("/") + 1), d = s.lastIndexOf(".");
+    e.textContent = d > 0 ? s.substring(0, d) : s;
+  } };
+}
+
+function build() {
+  buildOsc(1); buildOsc(2);
+
+  var nb = panel("s2", "Noise");
+  var nk = el("div", "knobs", el("div", "col", nb));
+  controls([["noise_level", "Level"]], nk);
+  control("noise_type", "Type", nk);
+
+  var sb = panel("s2", "Sub");
+  var sc = el("div", "col", sb);
+  control("sub_wave", "Wave", el("div", "knobs", sc));
+  var sk = el("div", "knobs", sc);
+  controls([["sub_tune", "Tune"], ["sub_level", "Level"]], sk);
+
+  var fb = panel("s4", "Filter");
+  var fc = el("div", "col", fb);
+  var f1 = el("div", "knobs", fc);
+  control("flt_type", "Type", f1);
+  controls([["flt_freq", "Freq"], ["flt_res", "Res"]], f1);
+  var f2 = el("div", "knobs", fc);
+  controls([["flt_key", "Key"], ["flt_vel", "Vel"], ["flt_env", "Amnt"],
+            ["flt_a", "A"], ["flt_d", "D"], ["flt_s", "S"], ["flt_r", "R"]], f2);
+  var fr = el("div", "col", fb); fr.style.flex = "1"; fr.style.minWidth = "0";
+  addCanvas(fr, drawAdsr("flt_a", "flt_d", "flt_s", "flt_r"), 104);
+
+  var ab = panel("s4", "ADSR");
+  var al = el("div", "col", ab);
+  var ak = el("div", "knobs", al);
+  controls([["vca_a", "A"], ["vca_d", "D"], ["vca_s", "S"], ["vca_r", "R"],
+            ["vca_vel", "Vel"]], ak);
+  var ar = el("div", "col", ab); ar.style.flex = "1"; ar.style.minWidth = "0";
+  addCanvas(ar, drawAdsr("vca_a", "vca_d", "vca_s", "vca_r"), 104);
+
+  [1, 2].forEach(function (n) {
+    var lb = panel("s3", "LFO " + n);
+    var lc = el("div", "col", lb); lc.style.flex = "1"; lc.style.minWidth = "0";
+    var l1 = el("div", "knobs", lc);
+    control("lfo" + n + "_shape", "Wave", l1);
+    controls([["lfo" + n + "_rate", "Rate"], ["lfo" + n + "_depth", "Depth"]], l1);
+    var l2 = el("div", "knobs", lc);
+    control("lfo" + n + "_sync", "Sync", l2);
+    controls([["lfo" + n + "_beat", "Beat"], ["lfo" + n + "_phase", "Phase"],
+              ["lfo" + n + "_offset", "Offset"]], l2);
+    addCanvas(lc, drawLfo("lfo" + n + "_shape", "lfo" + n + "_depth",
+                          "lfo" + n + "_offset", "lfo" + n + "_phase"), 54);
+  });
+
+  var mb = panel("s6", "Mod");
+  var mc = el("div", "col", mb); mc.style.flex = "1"; mc.style.minWidth = "0";
+  for (var i = 1; META["m" + i + "_src"]; i++) {
+    var r = el("div", "row", mc);
+    var n = el("div", "n", r); n.textContent = i;
+    control("m" + i + "_on", null, r, "sw");
+    control("m" + i + "_src", null, r);
+    var ar2 = el("div", "arrow", r); ar2.textContent = "→";
+    control("m" + i + "_dst", null, r);
+    control("m" + i + "_amt", "Amt", r);
+  }
+
+  var ub = panel("s8", "Macros");
+  var uk = el("div", "knobs", el("div", "col", ub));
+  for (var j = 1; META["u" + j]; j++) {
+    var cell = el("div", "macro", uk);
+    control("u" + j, "U" + j, cell);
+    control("u" + j + "_target", null, cell);
+  }
+
+  var gb = panel("s4", "Global");
+  var gk = el("div", "knobs", el("div", "col", gb));
+  control("voice_mode", "Mode", gk);
+  control("legato", "Legato", gk);
+  control("glide_mode", "Glide", gk);
+  controls([["glide", "Rate"], ["voices", "Voices"], ["pb_range", "PB"],
+            ["volume", "Level"]], gk);
+
+  /* Anything ui_pages.json declares that the layout above did not place —
+   * a new control lands here rather than silently vanishing from the UI. */
+  var rest = Object.keys(META).filter(function (k) {
+    return !placed[k] && k !== "preset" && k !== "save_preset" && META[k].t !== "file";
+  });
+  if (rest.length) {
+    var ob = panel("s12", "Other");
+    var ok = el("div", "knobs", el("div", "col", ob));
+    rest.forEach(function (k) { control(k, META[k].n, ok); });
+  }
+}
+
+/* ---------------------------------------------------------------- preset */
+function wirePreset() {
+  var idx = 0;
+  var nameEl = document.getElementById("presetname");
+  document.getElementById("pprev").addEventListener("click", function () {
+    send("preset", Math.max(0, idx - 1));
+  });
+  document.getElementById("pnext").addEventListener("click", function () {
+    send("preset", idx + 1);
+  });
+  document.getElementById("psave").addEventListener("click", function (e) {
+    send("save_preset", 1);
+    var b = e.target; b.textContent = "Saved";
+    setTimeout(function () { b.textContent = "Save"; }, 1200);
+  });
+  document.getElementById("prename").addEventListener("click", function () {
+    var v = document.getElementById("pname").value.trim();
+    if (v) send("preset_name", v);
+  });
+  CTL.preset = { set: function (v) { idx = parseInt(v, 10) || 0; } };
+  schwungRemote.onParamChange(function (p) {
+    if (p[K + "preset_name"] !== undefined) {
+      nameEl.textContent = p[K + "preset_name"] || "Init";
+      document.getElementById("pname").placeholder = p[K + "preset_name"] || "rename…";
+    }
+  });
+}
+
+fetch("ui_pages.json").then(function (r) { return r.json(); }).then(function (d) {
+  d.pages.forEach(function (page) {
+    page.slots.forEach(function (s) { if (s) META[s.k] = s; });
+  });
+  build();
+  wirePreset();
+  drawAll();
+  schwungRemote.onParamChange(function (p) {
+    for (var key in p) {
+      if (key.indexOf(K) !== 0) continue;
+      var c = CTL[key.substring(K.length)];
+      if (c) c.set(p[key]);
+    }
+  });
+});
 })();
 </script>
 </body>
