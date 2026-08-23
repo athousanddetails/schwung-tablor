@@ -158,7 +158,7 @@ static bool read_blob_file(const char *path, std::string &blob)
         const char *b = line;
         const char *bar = strchr(line, '|');    /* legacy "Name|blob" lines */
         if (bar) b = bar + 1;
-        if (!strncmp(b, "TBLR1;", 6)) { blob = b; ok = true; }
+        if (!strncmp(b, "TBLR1;", 6) || !strncmp(b, "TBLR2;", 6)) { blob = b; ok = true; }
     }
     fclose(f);
     return ok;
@@ -190,10 +190,10 @@ static void migrate_old_user_slots(tablor_instance *inst)
             char *bar = strchr(line, '|');
             const char *b = line;
             if (bar) { *bar = 0; if (line[0]) name = line; b = bar + 1; }
-            if (!strncmp(b, "TBLR1;", 6)) blob = b;
+            if (!strncmp(b, "TBLR1;", 6) || !strncmp(b, "TBLR2;", 6)) blob = b;
         }
         fclose(f);
-        if (!blob.empty() && blob != "TBLR1;")
+        if (!blob.empty() && blob != "TBLR1;" && blob != "TBLR2;")
             write_preset_file(preset_file_for(unique_preset_name(
                 sanitize_preset_name(name.c_str()))), blob.c_str());
         ::remove(old);
@@ -558,7 +558,11 @@ static float clamp_param(const tb_param_t *p, float v)
 /* Serialize the current sound into inst->state_buf (TBLR1 blob). */
 static void build_state_blob(tablor_instance *inst)
 {
-    int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR1;");
+    /* TBLR2, not TBLR1: v1.0.5 reordered the LFO shape options (the host
+     * draws the glyph from the index), so the same lfoN_shape number means a
+     * different waveform on either side of that release. The tag is how a
+     * loader can tell which order a blob was saved under. */
+    int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR2;");
     for (int i = 0; i < TB_PARAM_COUNT; i++) {
         if (tb_params[i].type == TB_PATH) {   /* wavetable: store the path */
             const char *path = inst->wt_path[tb_path_slot(i)];
@@ -590,12 +594,30 @@ static void reset_to_defaults(tablor_instance *inst)
     inst->engine.syncModSlots();
 }
 
-/* Version-tagged blob: "TBLR1;key=val;key=val;…". Anything without the
+/* Old-order LFO shape -> new order (v1.0.5 made the option index equal the
+ * host's glyph id). Old: Sine Tri SawUp SawDown Square Square+ S&H Noise.
+ * New:  Sine Tri SawUp Square S&H Pulse SawDown Noise.
+ *
+ * Without this, a patch saved before the reorder plays different LFO shapes
+ * than it was saved with -- reported as an S&H-on-position patch suddenly
+ * "re-cycling" the wavetable, which is exactly old-S&H's index landing on
+ * Saw Down. Caveat, recorded honestly: a blob saved as TBLR1 by v1.0.5 or
+ * v1.0.6 (the two releases between the reorder and this tag) already stores
+ * NEW indices and gets remapped wrongly once; re-saving fixes it, and those
+ * releases were current for two days. */
+static int tb_migrate_lfo_shape_v1(int old)
+{
+    static const int k[8] = { 0, 1, 2, 6, 3, 5, 4, 7 };
+    return (old >= 0 && old < 8) ? k[old] : old;
+}
+
+/* Version-tagged blob: "TBLR1;…" or "TBLR2;…". Anything without a known
  * tag is from another life — ignore it entirely rather than half-apply
  * it (the ER-99 total-silence lesson). */
 static void apply_state_blob(tablor_instance *inst, const char *val)
 {
-    if (strncmp(val, "TBLR1;", 6) != 0) return;
+    bool v1 = strncmp(val, "TBLR1;", 6) == 0;
+    if (!v1 && strncmp(val, "TBLR2;", 6) != 0) return;
     const char *p = val + 6;
     char kbuf[64], vbuf[512];
     while (*p) {
@@ -609,6 +631,10 @@ static void apply_state_blob(tablor_instance *inst, const char *val)
             memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
             int idx = param_index(kbuf);
             if (idx >= 0) {
+                if (v1 && (idx == TB_P_LFO1_SHAPE || idx == TB_P_LFO2_SHAPE)) {
+                    snprintf(vbuf, sizeof vbuf, "%d",
+                             tb_migrate_lfo_shape_v1(atoi(vbuf)));
+                }
                 if (tb_params[idx].type == TB_PATH)
                     set_table_path(inst, tb_path_slot(idx), vbuf);
                 else

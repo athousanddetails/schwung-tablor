@@ -200,7 +200,20 @@ int main(int argc, char **argv)
     /* ---- state round-trip ---- */
     api->set_param(inst, "vca_r", "77");
     n = api->get_param(inst, "state", big, sizeof big);
-    CHECK(n > 6 && !strncmp(big, "TBLR1;", 6), "state is version-tagged (%d bytes)", n);
+    CHECK(n > 6 && !strncmp(big, "TBLR2;", 6), "state is version-tagged (%d bytes)", n);
+
+    /* A TBLR1 blob is the pre-1.0.5 shape order: loading one must MIGRATE the
+     * lfo shape index, not take it literally. Old index 6 was S&H; taken
+     * literally it is now Saw Down, which turns a bounce-the-position patch
+     * into a ramp -- the reported "LFO re-cycles the wavetable". */
+    api->set_param(inst, "synth:state", "TBLR1;lfo1_shape=6;");
+    api->get_param(inst, "lfo1_shape", buf, sizeof buf);
+    CHECK(!strcmp(buf, "S&H") || !strcmp(buf, "4"),
+          "TBLR1 lfo shape 6 (old S&H) loads as S&H, not Saw Down -> \"%s\"", buf);
+    api->set_param(inst, "synth:state", "TBLR2;lfo1_shape=6;");
+    api->get_param(inst, "lfo1_shape", buf, sizeof buf);
+    CHECK(!strcmp(buf, "Saw Down") || !strcmp(buf, "6"),
+          "TBLR2 lfo shape 6 stays Saw Down -> \"%s\"", buf);
     CHECK(strstr(big, "vca_r=77") != nullptr, "state contains vca_r=77");
 
     static char saved[sizeof big];
