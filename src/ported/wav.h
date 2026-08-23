@@ -219,9 +219,27 @@ inline int wavRefineFrameSize(const std::vector<float> &s, int frameSize)
             if (ratio > worst) worst = ratio;
             judged++;
         }
-        /* 0.5% leaves room for quantisation -- a 16-bit file's noise floor is
-         * far below it -- while any real odd harmonic sits far above. */
-        if (!judged || worst > 0.005) break;
+        /*
+         * The threshold sits in a wide, measured gap.
+         *
+         * Tables whose frames really are shorter than they look score 0.011
+         * to 0.056 at every step down to the true size (a 128-frame table
+         * measured 0.056 / 0.043 / 0.026 / 0.056 across four halvings). Real
+         * tables score 0.35 to 1.00 at their own frame size -- 1.00 exactly
+         * when the frame is genuinely one cycle, and 0.48 for DigiAdd07,
+         * whose later frames legitimately hold only even harmonics.
+         *
+         * 0.15 is roughly 3x above the highest false frame and 3x below the
+         * lowest real one. It is not zero because sub-cycles MORPH: eight
+         * neighbouring cycles inside one apparent frame differ slightly, and
+         * that difference is odd-harmonic energy. Demanding zero only caught
+         * tables whose sub-cycles were identical.
+         *
+         * The chain stops itself: halving continues while the answer stays
+         * small and stops at the first frame size that is genuinely one
+         * cycle, which is the size wanted.
+         */
+        if (!judged || worst > 0.15) break;
         f = h;
     }
     return f;

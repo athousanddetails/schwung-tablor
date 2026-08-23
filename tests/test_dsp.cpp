@@ -584,6 +584,31 @@ static void testMorphToEvenHarmonicsKeepsItsFrame()
     int got = wavRefineFrameSize(s, 512);
     CHECK(got == 512, "frames stay 512, not halved to 256 (got %d)", got);
 
+    /* The measured gap the threshold sits in, from real files:
+     *   must NOT halve   DigiAdd07 0.478, WAVETABLE Factory 0.999,
+     *                    a genuine 2048 table 1.000
+     *   MUST halve       128-frame table 0.056/0.043/0.026/0.056,
+     *                    256-frame table 0.011
+     * 0.15 is ~3x clear of both sides. These two synthetic tables stand in
+     * for each end, so a future tweak that closes the gap fails here. */
+    {
+        /* a 2048 frame that is really 16 cycles of 128, morphing */
+        const int F = 2048, N = 4;
+        std::vector<float> t((size_t) F * N);
+        for (int k = 0; k < N * 16; k++) {
+            float m = (float) k / (N * 16 - 1);
+            for (int i = 0; i < 128; i++) {
+                float u = (float) i / 128, v = 0.0f;
+                for (int h = 1; h <= 1 + (int) (m * 15); h++)
+                    v += std::sin(2.0f * (float) M_PI * h * u) / h;
+                t[(size_t) k * 128 + i] = v * 0.4f;
+            }
+        }
+        CHECK(wavRefineFrameSize(t, 2048) == 128,
+              "a 2048 frame holding 16 morphing cycles resolves to 128 (got %d)",
+              wavRefineFrameSize(t, 2048));
+    }
+
     /* and the genuine case still IS caught: every frame two identical halves */
     std::vector<float> t((size_t) F * N);
     for (int k = 0; k < N; k++)

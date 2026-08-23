@@ -184,17 +184,27 @@ private:
             WavData w;
             if (!wavLoad(entry.path.c_str(), w))
                 return nullptr;
-            samples = std::move(w.samples);
             rate = w.sampleRate > 0 ? w.sampleRate : 44100.0f;
-            /* The author's own declaration wins over any guess. */
+
+            /* DECIDE THE FRAME SIZE BEFORE MOVING THE SAMPLES.
+             *
+             * This read `wavInferFrameSize(w)` AFTER `samples = move(w.samples)`,
+             * so it asked a moved-from vector for its length, got 0, and fell
+             * through to "the whole file is one cycle" -- every .wav without a
+             * clm chunk collapsed into a single frame. A Serum or Vital export
+             * survived, because clm is a separate field the move does not
+             * touch; everything else lost its frames entirely. That is why
+             * "only 2048 wavetables work": the ones that worked were the ones
+             * carrying clm.
+             */
             frameSize = wavFrameSizeFromName(entry.path.c_str());
             if (!frameSize) frameSize = wavInferFrameSize(w);
             /* A short file that repeats is MULTI-FRAME, not one long cycle.
              * Taking the whole thing as a single cycle made its content loop
              * inside every oscillator period. Only for short files -- see
              * wavDetectCycle. */
-            if (w.clmFrameSize <= 0 && (int) samples.size() <= 2048) {
-                int cyc = wavDetectCycle(samples, (int) samples.size());
+            if (w.clmFrameSize <= 0 && (int) w.samples.size() <= 2048) {
+                int cyc = wavDetectCycle(w.samples, (int) w.samples.size());
                 if (cyc > 0) frameSize = cyc;
             }
             /* ...and a frame that is really a run of shorter frames.
@@ -205,7 +215,9 @@ private:
              * guess; if the samples PROVE a shorter period, the samples win.
              * Only a clm chunk is exempt, because a tool wrote it. */
             if (w.clmFrameSize <= 0)
-                frameSize = wavRefineFrameSize(samples, frameSize);
+                frameSize = wavRefineFrameSize(w.samples, frameSize);
+
+            samples = std::move(w.samples);
             if (!frameSize) {
                 /* No power-of-two cycle divides the file. That is the normal
                  * shape of a single-cycle table -- Adventure Kid's own AKWF is

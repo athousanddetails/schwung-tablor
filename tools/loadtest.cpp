@@ -14,6 +14,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <dlfcn.h>
@@ -540,6 +541,48 @@ int main(int argc, char **argv)
     CHECK(strstr(big, "\"key\":\"preset\"") && strstr(big, "\"Init\"") &&
           strstr(big, "\"Glass Bells\""),
           "PRESET cell carries the factory presets at boot");
+
+    /* A .wav with NO clm chunk must keep its frames.
+     *
+     * The frame size was being inferred from a moved-from vector, so it came
+     * back 0 and the whole file loaded as ONE cycle. Only clm-carrying files
+     * (Serum, Vital) escaped, which is exactly why "just use 2048" looked
+     * like the rule. Nothing in the seeded library catches this -- every
+     * table there is .wt2048 and names its size in the extension -- so the
+     * probe writes a plain .wav and checks the loaded table has frames. */
+    {
+        const char *wp = "/tmp/lt_noclm_512x27.wav";
+        FILE *wf = fopen(wp, "wb");
+        if (wf) {
+            const int F = 512, NF = 27;
+            const uint32_t bytes = (uint32_t) (F * NF * 4);
+            uint32_t u; uint16_t v;
+            fwrite("RIFF", 1, 4, wf); u = 36 + bytes; fwrite(&u, 4, 1, wf);
+            fwrite("WAVEfmt ", 1, 8, wf); u = 16; fwrite(&u, 4, 1, wf);
+            v = 3; fwrite(&v, 2, 1, wf); v = 1; fwrite(&v, 2, 1, wf);
+            u = 44100; fwrite(&u, 4, 1, wf); u = 44100 * 4; fwrite(&u, 4, 1, wf);
+            v = 4; fwrite(&v, 2, 1, wf); v = 32; fwrite(&v, 2, 1, wf);
+            fwrite("data", 1, 4, wf); fwrite(&bytes, 4, 1, wf);
+            for (int k = 0; k < NF; k++)
+                for (int i = 0; i < F; i++) {
+                    float uu = (float) i / F, val = 0.0f;
+                    for (int hm = 1; hm <= 1 + k; hm++)
+                        val += sinf(2.0f * 3.14159265f * hm * uu) / hm;
+                    val *= 0.4f;
+                    fwrite(&val, 4, 1, wf);
+                }
+            fclose(wf);
+            api->set_param(inst, "wt1_table", wp);
+            settle(api, inst);
+            api->get_param(inst, "wt1_shape", big, sizeof big);
+            int gotFrames = atoi(big);
+            CHECK(gotFrames > 1,
+                  "a .wav with no clm keeps its frames (digest says %d)", gotFrames);
+            remove(wp);
+            api->set_param(inst, "wt1_table", "");
+            settle(api, inst);
+        }
+    }
 
     /* ---- the preset-page tap buttons ---- */
     {
