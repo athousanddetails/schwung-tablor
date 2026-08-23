@@ -103,6 +103,32 @@ private:
         return std::min(wt->size() - 1, i);
     }
 
+    /* Position as a CONTINUOUS place in the table: the two frames either side
+     * and how far between them.
+     *
+     * The oscillator used to snap to one frame and change it at a phase wrap.
+     * That is fine when position is a hand-turned knob, but under modulation
+     * it is not: an envelope sweeping the whole table across a 45 ms attack
+     * crosses ~25 frames per cycle, so every wrap jumped a long way through
+     * the table at once and left a step. Reported as the sound being "a
+     * little crunchy around the edges" -- the edges being exactly where an
+     * envelope moves. Blending the two neighbours removes the steps entirely
+     * and is what Serum and Vital do. */
+    inline void posToFrames(float position, const FrameTable *&a,
+                            const FrameTable *&b, float &frac) const
+    {
+        const int last = wt->size() - 1;
+        float fp = position * (float) last;
+        if (fp < 0.0f) fp = 0.0f;
+        if (fp > (float) last) fp = (float) last;
+        int i0 = (int) fp;
+        if (i0 > last) i0 = last;
+        int i1 = i0 < last ? i0 + 1 : last;
+        frac = fp - (float) i0;
+        a = wt->frame(i0);
+        b = wt->frame(i1);
+    }
+
     inline float freqDelta(float note) const
     {
         float freq = (float) std::min(sampleRate / 2.0,
@@ -143,25 +169,26 @@ private:
             tableIndex = posToIndex(p.position);
 
         const float delta = freqDelta(note);
-        const FrameTable *ft = wt->frame(tableIndex);
+        const FrameTable *fa = nullptr, *fb = nullptr;
+        float frac = 0.0f;
+        posToFrames(p.position, fa, fb, frac);
 
         while (n > 0) {
             int todo = std::min(n, (int) ((1.0f - phase) / delta) + 1);
             n -= todo;
             for (; todo > 0; todo--) {
-                float s = ft->processLinear(note, std::min(kAlmostOne, phase));
+                const float ph = std::min(kAlmostOne, phase);
+                float s = fa->processLinear(note, ph);
+                if (frac > 0.0f)
+                    s += (fb->processLinear(note, ph) - s) * frac;
                 postProcess(p, s);
                 *l++ += s * p.leftGain;
                 *r++ += s * p.rightGain;
                 phase += delta;
             }
-            while (phase >= 1.0f) {
-                phase -= 1.0f;
-                lastTableIndex = tableIndex;
-                tableIndex = posToIndex(p.position);
-                ft = wt->frame(tableIndex);
-            }
+            while (phase >= 1.0f) phase -= 1.0f;
         }
+        lastTableIndex = tableIndex = posToIndex(p.position);
     }
 
     void processComplex(float note, const Params &p, float *l, float *r, int n)
@@ -172,26 +199,26 @@ private:
         const float delta = freqDelta(note);
         const float formantMul = (p.formant != 0.0f)
             ? std::exp(p.formant * 1.60943791243f) : 1.0f;
-        const FrameTable *ft = wt->frame(tableIndex);
+        const FrameTable *fa = nullptr, *fb = nullptr;
+        float frac = 0.0f;
+        posToFrames(p.position, fa, fb, frac);
 
         while (n > 0) {
             int todo = std::min(n, (int) ((1.0f - phase) / delta) + 1);
             n -= todo;
             for (; todo > 0; todo--) {
                 float ph = distort(std::min(kAlmostOne, phase), p.bend, formantMul);
-                float s = ft->processLinear(note, ph);
+                float s = fa->processLinear(note, ph);
+                if (frac > 0.0f)
+                    s += (fb->processLinear(note, ph) - s) * frac;
                 postProcess(p, s);
                 *l++ += s * p.leftGain;
                 *r++ += s * p.rightGain;
                 phase += delta;
             }
-            while (phase >= 1.0f) {
-                phase -= 1.0f;
-                lastTableIndex = tableIndex;
-                tableIndex = posToIndex(p.position);
-                ft = wt->frame(tableIndex);
-            }
+            while (phase >= 1.0f) phase -= 1.0f;
         }
+        lastTableIndex = tableIndex = posToIndex(p.position);
     }
 
     void processCrossfade(float note, const Params &p, float *l, float *r, int n)

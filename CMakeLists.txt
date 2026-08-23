@@ -60,6 +60,16 @@ target_link_libraries(tablor_enginebench PRIVATE m)
 target_link_options(tablor_enginebench PRIVATE ${TB_STATIC_LINK})
 
 # Wavetable switch probe (run on the Move).
+add_executable(tablor_render tools/render.cpp)
+target_include_directories(tablor_render PRIVATE src src/host)
+target_link_libraries(tablor_render PRIVATE dl m)
+target_link_options(tablor_render PRIVATE ${TB_STATIC_LINK})
+
+add_executable(tablor_quantprobe tools/quantprobe.cpp)
+target_include_directories(tablor_quantprobe PRIVATE src src/host)
+target_link_libraries(tablor_quantprobe PRIVATE dl m)
+target_link_options(tablor_quantprobe PRIVATE ${TB_STATIC_LINK})
+
 add_executable(tablor_clickprobe tools/clickprobe.cpp)
 target_include_directories(tablor_clickprobe PRIVATE src src/host)
 target_link_libraries(tablor_clickprobe PRIVATE dl m)
