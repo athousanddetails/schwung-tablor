@@ -3,7 +3,7 @@
  "name": "Tablor",
  "banks": [
   {
-   "name": "Preset",
+   "name": "Presets",
    "global": true,
    "rows": [
     [
@@ -25,7 +25,19 @@
       "automatable": false,
       "render": "preset"
      },
-     null,
+     {
+      "key": "preset_rnd",
+      "short": "RAND",
+      "full": "Rnd Prst",
+      "type": "enum",
+      "options": [
+       "-",
+       "Random"
+      ],
+      "automatable": false,
+      "behavior": "trigger",
+      "access": "write"
+     },
      null,
      null,
      null,
@@ -982,18 +994,7 @@
       "min": 0,
       "max": 127
      },
-     {
-      "key": "save_preset",
-      "short": "SAVE",
-      "full": "Save Preset",
-      "type": "enum",
-      "options": [
-       "Off",
-       "On"
-      ],
-      "automatable": false,
-      "behavior": "trigger"
-     }
+     null
     ]
    ]
   },

@@ -473,6 +473,23 @@ static void tb_publish_selection(tablor_instance *inst)
     out += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}"
            ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}"
            ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"int\",\"min\":0,\"max\":0}";
+    /* The PRESET cell: its options ARE the preset list, factory + user, so
+     * the page's enum can step and dive through everything. Republished from
+     * the worker whenever a save or rename changes the list. */
+    {
+        auto ps = inst->presetList();
+        out += ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"enum\","
+               "\"automatable\":false,\"options\":[";
+        size_t np = ps->items.size();
+        if (np > 128) np = 128;          /* the host's MAX_ENUM_OPTIONS */
+        for (size_t i = 0; i < np; i++) {
+            if (i) out += ",";
+            out += "\"";
+            tb_json_append(out, ps->items[i].name);
+            out += "\"";
+        }
+        out += "]}";
+    }
     out += "]";
 
     std::atomic_store(&inst->sel,
@@ -723,6 +740,49 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         return;
     }
 
+    /* The tap-buttons. A trigger fires on any value that is not its idle
+     * first option -- the host sends option 1 through the enum wire, so both
+     * the NAME and "1" must fire (MODULES.md, access:"write"). */
+    /* Save As: the committed keyboard text IS the new preset's name. */
+    if (!strcmp(k, "save_as")) {
+        /* A blank commit means "never mind" -- sanitize would helpfully turn
+         * it into "Untitled", which is exactly the file spam this replaces. */
+        bool any = false;
+        for (const char *c = val; *c; c++) if (*c != ' ') { any = true; break; }
+        if (!any) return;
+        std::string name = sanitize_preset_name(val);
+        build_state_blob(inst);
+        std::string blob = inst->state_buf;
+        /* unique_preset_name stats the filesystem, so it runs on the worker --
+         * this is the SPI callback */
+        inst->loader.post([inst, name, blob] {
+            /* The keyboard prefills the current preset's name, so committing
+             * it unchanged means "save over mine" -- the path already exists
+             * and is simply rewritten. A new name makes a new file. */
+            std::string path = preset_file_for(name);
+            write_preset_file(path, blob.c_str());
+            scan_user_presets(inst);
+            select_preset_by_path(inst, path);
+            tb_publish_selection(inst);       /* the PRESET cell's options */
+        });
+        return;
+    }
+    if (!strcmp(k, "preset_rnd")) {
+        if (!strcmp(val, "-") || !strcmp(val, "0")) return;
+        auto ps = inst->presetList();
+        int n = (int) ps->items.size();
+        if (n < 2) return;
+        /* never re-pick the current one: a button that sometimes does
+         * nothing feels broken */
+        int cur = inst->preset_index.load();
+        int pick = rand() % (n - 1);
+        if (pick >= cur) pick++;
+        char buf2[16];
+        snprintf(buf2, sizeof buf2, "%d", pick);
+        tb_set_param(inst, "preset", buf2);
+        return;
+    }
+
     if (!strcmp(k, "save_preset")) {
         /* Trigger: never stores a value. Destination:
          *   "new"      -> a fresh .tblr file ("Untitled", "Untitled 2", …)
@@ -738,7 +798,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
             if (ui < ps->factory_count || ui >= (int) ps->items.size())
                 return;
             path = ps->items[(size_t) ui].path;
-        } else if (!strcmp(val, "1") || !strcmp(val, "On")) {
+        } else if (!strcmp(val, "1") || !strcmp(val, "On") || !strcmp(val, "Save")) {
             if (inst->preset_index.load() >= ps->factory_count)
                 path = ps->items[(size_t) inst->preset_index.load()].path;
             else
@@ -753,6 +813,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
             write_preset_file(path, blob.c_str());
             scan_user_presets(inst);
             select_preset_by_path(inst, path);
+            tb_publish_selection(inst);       /* the PRESET cell's options */
         });
         return;
     }
@@ -771,6 +832,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
             ::remove(oldPath.c_str());
             scan_user_presets(inst);
             select_preset_by_path(inst, newPath);
+            tb_publish_selection(inst);
         });
         return;
     }
@@ -902,6 +964,21 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "wt1_shape") || !strcmp(key, "wt2_shape")) {
         auto sp = inst->shape(key[2] == '2' ? 1 : 0);
         return write_str(buf, buf_len, sp ? sp->c_str() : "");
+    }
+
+    /* Triggers read as their idle option, so the host learns the NAME wire
+     * and a page shows a quiet "-" rather than junk. */
+    if (!strcmp(key, "save_preset") || !strcmp(key, "preset_rnd"))
+        return write_str(buf, buf_len, "-");
+    if (!strcmp(key, "save_as")) {
+        /* Prefill the keyboard with the name of the preset being edited, so
+         * confirm = overwrite. Factory presets prefill blank: they cannot be
+         * overwritten, so the user is choosing a NEW name. */
+        auto ps = inst->presetList();
+        int pi = inst->preset_index.load();
+        if (pi >= ps->factory_count && pi < (int) ps->items.size())
+            return write_str(buf, buf_len, ps->items[(size_t) pi].name.c_str());
+        return write_str(buf, buf_len, "");
     }
 
     /* The host asks this while a contract re-read is pending and holds off
@@ -1043,6 +1120,12 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
          * single scan — so get_param never has to. */
         tb_publish_selection(inst);
         load_presets(inst);                                /* fopen + scan   */
+        /* AGAIN, now that the presets exist. The first call publishes the
+         * wavetable lists, but the PRESET cell's options ARE the preset list,
+         * and load_presets runs after it -- so a single early call left that
+         * enum with no options at all: the cell read 0 and stepping it found
+         * nothing. */
+        tb_publish_selection(inst);
         /* The digest is built from the real samples, on this thread, as each
          * table lands -- including these built-in ones. */
         inst->loader.onTable = [inst](int osc, const tb::Wavetable &wt) {

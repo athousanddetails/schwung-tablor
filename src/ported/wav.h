@@ -48,12 +48,21 @@ inline bool wavLoad(const char *path, WavData &out)
         long next = std::ftell(f) + (long) len + (len & 1); /* chunks pad to even */
 
         if (id == 0x20746d66u) {                            /* "fmt " */
-            uint8_t buf[16];
-            if (len >= 16 && std::fread(buf, 16, 1, f) == 1) {
+            uint8_t buf[40];   /* 16-byte core + the EXTENSIBLE extension */
+            /* Read the EXTENSION too, not just the 16-byte core: a file
+             * written as WAVE_FORMAT_EXTENSIBLE (0xFFFE) carries its real
+             * format in the SubFormat GUID at offset 24, and every tool that
+             * writes multichannel or >16-bit through the Windows API produces
+             * one -- Audacity's default export among them. Judging those by
+             * the tag alone rejected the whole file. */
+            const uint32_t want = len >= 40 ? 40u : 16u;
+            if (len >= 16 && std::fread(buf, want, 1, f) == 1) {
                 std::memcpy(&fmt, buf + 0, 2);
                 std::memcpy(&channels, buf + 2, 2);
                 std::memcpy(&rate, buf + 4, 4);
                 std::memcpy(&bits, buf + 14, 2);
+                if (fmt == 0xFFFEu && want == 40u)
+                    std::memcpy(&fmt, buf + 24, 2);     /* SubFormat GUID */
                 haveFmt = channels >= 1;
             }
         } else if (id == 0x206d6c63u) {                     /* "clm " (Serum) */
@@ -62,8 +71,8 @@ inline bool wavLoad(const char *path, WavData &out)
                 out.clmFrameSize = std::atoi(s.c_str() + 3);
         } else if (id == 0x61746164u && haveFmt) {          /* "data" */
             const int bytesPer = bits / 8;
-            if ((fmt == 1 && (bits == 16 || bits == 24 || bits == 32)) ||
-                (fmt == 3 && bits == 32)) {
+            if ((fmt == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32)) ||
+                (fmt == 3 && (bits == 32 || bits == 64))) {
                 const uint32_t frames = len / (uint32_t) (bytesPer * channels);
                 out.samples.resize(frames);
                 std::vector<uint8_t> raw((size_t) bytesPer * channels);
@@ -71,8 +80,14 @@ inline bool wavLoad(const char *path, WavData &out)
                     if (std::fread(raw.data(), raw.size(), 1, f) != 1) break;
                     const uint8_t *p = raw.data();          /* channel 0 */
                     float v = 0.0f;
-                    if (fmt == 3) {
+                    if (fmt == 3 && bits == 64) {
+                        double d; std::memcpy(&d, raw.data(), 8);
+                        v = (float) d;
+                    } else if (fmt == 3) {
                         std::memcpy(&v, p, 4);
+                    } else if (bits == 8) {
+                        /* 8-bit PCM is UNSIGNED, centred on 128 */
+                        v = ((float) raw[0] - 128.0f) / 128.0f;
                     } else if (bits == 16) {
                         int16_t s16; std::memcpy(&s16, p, 2);
                         v = (float) s16 / 32768.0f;
@@ -117,6 +132,85 @@ inline int wavInferFrameSizeForLength(int n)
         if (n >= fs && n % fs == 0)
             return fs;
     return 0;
+}
+
+/* A frame size named in the FILE NAME, or 0.
+ *
+ * The convention every pack follows: "ADD Low FM 001 2048.wav",
+ * "Growl 512.wav", Adventure Kid's ".wt2048". When the author says what the
+ * frame is, that beats any guess made from the length -- and it is the only
+ * fully reliable way to declare a short frame, since a run of short frames
+ * and one long frame holding a high harmonic are the same samples. */
+inline int wavFrameSizeFromName(const char *path)
+{
+    if (!path) return 0;
+    const char *base = path;
+    for (const char *c = path; *c; c++) if (*c == '/') base = c + 1;
+    const char *dot = nullptr;
+    for (const char *c = base; *c; c++) if (*c == '.') dot = c;
+    const char *end = dot ? dot : base + std::strlen(base);
+    /* walk back over the trailing digits */
+    const char *d = end;
+    while (d > base && d[-1] >= '0' && d[-1] <= '9') d--;
+    if (d == end) return 0;
+    /* It must be a STANDALONE token. Not the tail of a word: "float32.wav"
+     * ends in a legal frame size and means nothing of the kind, and neither
+     * does "AKWP0042". (The .wtNNNN extension declares its size through the
+     * scanner, not through this.) */
+    if (d > base && d[-1] != ' ' && d[-1] != '_' && d[-1] != '-')
+        return 0;
+    int v = 0;
+    for (const char *c = d; c < end && v <= 8192; c++) v = v * 10 + (*c - '0');
+    if (v < 32 || v > 4096 || !wavIsPow2(v)) return 0;
+    return v;
+}
+
+/* The inferred frame may itself be a RUN of shorter frames.
+ *
+ * wavInferFrameSize takes the largest power of two that divides the file,
+ * which is the right guess for the 2048-frame tables every tool exports. But
+ * 16 frames of 256 is 4096 samples, and 2048 divides that too -- so it read
+ * as 2 frames of 2048, each holding 8 cycles, and played 8x too high. That
+ * is what "short wavetables sound wrong" is.
+ *
+ * A short-frame table repeats at its true frame size ALL THE WAY THROUGH, so
+ * that is what is tested: consecutive blocks of P samples across the whole
+ * file, scale-invariant so a morphing table's drift does not sink the score.
+ * A genuine 2048 table fails at every P -- consecutive 256-blocks of a
+ * complex waveform look nothing alike -- while a 256 table passes, its
+ * neighbours differing only slightly. The smallest P that passes is the true
+ * period; testing upward from 32 finds it. */
+inline int wavRefineFrameSize(const std::vector<float> &s, int frameSize)
+{
+    const int n = (int) s.size();
+    if (frameSize < 64 || n < frameSize * 2) return frameSize;
+    for (int p = 32; p < frameSize; p *= 2) {
+        if (n % p) continue;
+        int blocks = n / p;
+        if (blocks < 4) continue;
+        double sum = 0.0; int counted = 0;
+        for (int b = 0; b + 1 < blocks; b++) {
+            const float *a = &s[(size_t) b * p];
+            const float *c = &s[(size_t)(b + 1) * p];
+            double energy = 0, err = 0;
+            for (int i = 0; i < p; i++) {
+                energy += (double) a[i] * a[i];
+                double d = (double) a[i] - c[i];
+                err += d * d;
+            }
+            if (energy < 1e-9) continue;            /* silence proves nothing */
+            sum += err / energy;
+            counted++;
+        }
+        /* ABSOLUTE sameness, not correlated shape. Correlation is trivially
+         * high for slow content -- adjacent 32-sample chunks of a 2048-period
+         * sine are the same little arc -- which read an 8-frame 2048 table as
+         * 512 frames of 32. Periodicity means the next block REPEATS this
+         * one, so the residual has to be small against the signal's own
+         * energy. 5% leaves room for the drift of a morphing table. */
+        if (counted >= 3 && sum / counted <= 0.05) return p;
+    }
+    return frameSize;
 }
 
 inline int wavInferFrameSize(const WavData &w)

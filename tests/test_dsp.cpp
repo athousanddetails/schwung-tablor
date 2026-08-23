@@ -405,6 +405,153 @@ static void testLfoShapeOrder()
     }
 }
 
+/* Short-frame wavetables must play at the pitch they were written at.
+ *
+ * wavInferFrameSize takes the largest power of two that divides the file, so
+ * 16 frames of 256 (4096 samples) read as 2 frames of 2048 -- each holding 8
+ * cycles -- and played 8x too high. Reported as "shorter wavetables just
+ * sound wrong", with the conclusion that tables MUST be 2048. They must not:
+ * they must be READ right. */
+static void testShortFrameTables()
+{
+    printf("== short-frame wavetables ==\n");
+    struct C { const char *what; int frame, frames; int morph; int want; };
+    const C cases[] = {
+        { "16 x 256",              256,  16, 0,  256 },
+        { "32 x 512",              512,  32, 0,  512 },
+        { "8 x 1024",             1024,   8, 0, 1024 },
+        { "16 x 256 morphing",     256,  16, 1,  256 },
+        /* the guard: a real 2048 table must NOT be mistaken for short frames,
+         * and slow content must not read as a tiny period */
+        { "64 x 2048 morphing",   2048,  64, 2, 2048 },
+        { "8 x 2048 morphing",    2048,   8, 2, 2048 },
+    };
+    for (const auto &c : cases) {
+        std::vector<float> s((size_t) c.frame * c.frames);
+        for (int f = 0; f < c.frames; f++)
+            for (int i = 0; i < c.frame; i++) {
+                float u = (float) i / c.frame, v;
+                if (c.morph == 2) { v = 0; int H = 1 + f * 2;
+                    for (int h = 1; h <= H; h++) v += std::sin(2*(float)M_PI*h*u)/h; v *= 0.5f; }
+                else if (c.morph == 1) { float m = (float) f / c.frames;
+                    v = ((1-m)*std::sin(2*(float)M_PI*u)
+                       + m*(std::sin(2*(float)M_PI*u)+0.5f*std::sin(6*(float)M_PI*u))) * 0.7f; }
+                else v = std::sin(2*(float)M_PI*u) * 0.8f;
+                s[(size_t) f * c.frame + i] = v;
+            }
+        int got = wavRefineFrameSize(s, wavInferFrameSizeForLength((int) s.size()));
+        CHECK(got == c.want, "%s reads as frame %d (got %d)", c.what, c.want, got);
+    }
+
+    /* the author's own declaration outranks any guess from the content */
+    CHECK(wavFrameSizeFromName("/x/ADD Low FM 001 2048.wav") == 2048, "name: trailing 2048");
+    CHECK(wavFrameSizeFromName("/x/Growl 512.wav") == 512, "name: trailing 512");
+    CHECK(wavFrameSizeFromName("/x/Pad_256.wav") == 256, "name: underscore 256");
+    CHECK(wavFrameSizeFromName("/x/AKWP 0042.wav") == 0, "name: 0042 is an index, not a size");
+    CHECK(wavFrameSizeFromName("/x/Bass 600.wav") == 0, "name: 600 is not a legal frame");
+    CHECK(wavFrameSizeFromName("/x/render float32.wav") == 0,
+          "name: the 32 in \"float32\" is not a frame size");
+    CHECK(wavFrameSizeFromName("/x/Sweep-1024.wav") == 1024, "name: hyphen 1024");
+}
+
+static void put(FILE*f,const void*p,size_t n){fwrite(p,n,1,f);}
+static void p32(FILE*f,uint32_t v){put(f,&v,4);}
+static void p16(FILE*f,uint16_t v){put(f,&v,2);}
+
+/* Every wav flavour a wavetable can arrive in must load AND play at the
+ * pitch it was written at. A file rejected by the loader, or read at the
+ * wrong frame size, is the same thing to a user: "this wavetable does not
+ * work". WAVE_FORMAT_EXTENSIBLE is the one that used to be rejected outright
+ * -- it is what every tool writing through the Windows API produces. */
+/* tag: 1=pcm 3=float 0xFFFE=extensible(sub) ; bits: 8/16/24/32/64 */
+static void writeWav(const char*path,const std::vector<float>&s,int tag,int bits,
+                     int channels,int sub,const char*clm)
+{
+    FILE*f=fopen(path,"wb");
+    const int bytesPer=bits/8;
+    const uint32_t dataBytes=(uint32_t)s.size()*bytesPer*channels;
+    const uint32_t fmtLen=(tag==0xFFFE)?40u:16u;
+    uint32_t clmLen=clm?(uint32_t)strlen(clm):0; if(clmLen&1) clmLen++;
+    fwrite("RIFF",1,4,f); p32(f,4+8+fmtLen+(clm?8+clmLen:0)+8+dataBytes); fwrite("WAVE",1,4,f);
+    fwrite("fmt ",1,4,f); p32(f,fmtLen);
+    p16(f,(uint16_t)tag); p16(f,(uint16_t)channels); p32(f,44100);
+    p32(f,44100*bytesPer*channels); p16(f,(uint16_t)(bytesPer*channels)); p16(f,(uint16_t)bits);
+    if(tag==0xFFFE){ p16(f,22); p16(f,(uint16_t)bits); p32(f,0);
+        p16(f,(uint16_t)sub); p16(f,0); p32(f,0); p32(f,0); p32(f,0); }
+    if(clm){ fwrite("clm ",1,4,f); p32(f,clmLen);
+        fwrite(clm,1,strlen(clm),f); for(uint32_t i=(uint32_t)strlen(clm);i<clmLen;i++) fputc(0,f); }
+    fwrite("data",1,4,f); p32(f,dataBytes);
+    for(float v : s) for(int c=0;c<channels;c++){
+        if(tag==3||sub==3){ if(bits==64){double d=v;put(f,&d,8);} else put(f,&v,4); }
+        else if(bits==8){ uint8_t b=(uint8_t)(v*127.0f+128.0f); put(f,&b,1); }
+        else if(bits==16){ int16_t x=(int16_t)(v*32767.0f); put(f,&x,2); }
+        else if(bits==24){ int32_t x=(int32_t)(v*8388607.0f); put(f,&x,3); }
+        else { int32_t x=(int32_t)(v*2147483000.0f); put(f,&x,4); }
+    }
+    fclose(f);
+}
+static float heardHz(const std::vector<float>&data,int fs,int nf){
+    Wavetable wt; if(!wtBuild(wt,data.data(),nf,fs,44100.0f,44100.0f)) return -1;
+    WTOscillator osc; osc.setSampleRate(44100.0); osc.setWavetable(&wt);
+    WTOscillator::Params p; p.position=0; p.leftGain=1; p.rightGain=1;
+    std::vector<float> l(44100,0),r(44100,0);
+    osc.processAdding(57.0f,p,l.data(),r.data(),44100);
+    int zc=0; for(size_t i=1;i<l.size();i++) if(l[i-1]<=0&&l[i]>0) zc++;
+    return zc*44100.0f/l.size();
+}
+
+static void testWavFormats()
+{
+    printf("== wav formats ==\n");
+
+    struct F { const char*name; int tag,bits,ch,sub; const char*clm; int frame,frames; };
+    const F fs[] = {
+      {"float32 mono",            3,32,1,0,nullptr,2048,8},
+      {"float64 mono",            3,64,1,0,nullptr,2048,8},
+      {"pcm16 mono",              1,16,1,0,nullptr,2048,8},
+      {"pcm24 mono",              1,24,1,0,nullptr,2048,8},
+      {"pcm32 mono",              1,32,1,0,nullptr,2048,8},
+      {"pcm8  mono",              1, 8,1,0,nullptr,2048,8},
+      {"pcm16 STEREO",            1,16,2,0,nullptr,2048,8},
+      {"EXTENSIBLE pcm16",   0xFFFE,16,1,1,nullptr,2048,8},
+      {"EXTENSIBLE float32", 0xFFFE,32,1,3,nullptr,2048,8},
+      {"EXTENSIBLE stereo24",0xFFFE,24,2,1,nullptr,2048,8},
+      {"clm says 1024",           3,32,1,0,"<!>1024 00000000 wavetable",1024,16},
+      {"clm says 256",            3,32,1,0,"<!>256 00000000 wavetable",  256,16},
+      {"short frames, no clm",    3,32,1,0,nullptr, 256,16},
+      {"single cycle 600",        3,32,1,0,nullptr, 600,1},
+    };
+    
+    int bad=0;
+    for (auto &c : fs) {
+        std::vector<float> s((size_t)c.frame*c.frames);
+        for(int f=0;f<c.frames;f++) for(int i=0;i<c.frame;i++)
+            s[(size_t)f*c.frame+i]=std::sin(2*(float)M_PI*i/c.frame)*0.8f;
+        char path[128]; snprintf(path,sizeof path,"/tmp/fmt_%s.wav",c.name);
+        for(char*q=path;*q;q++) if(*q==' ') *q='_';
+        writeWav(path,s,c.tag,c.bits,c.ch,c.sub,c.clm);
+        WavData w;
+        if(!wavLoad(path,w)){ CHECK(false, "%s: REJECTED by the loader", c.name); bad++; continue; }
+        int frame = w.clmFrameSize>0 ? w.clmFrameSize : wavFrameSizeFromName(path);
+        if(!frame) frame = wavInferFrameSize(w);
+        if(w.clmFrameSize<=0 && (int)w.samples.size()<=2048){
+            int cyc=wavDetectCycle(w.samples,(int)w.samples.size()); if(cyc>0) frame=cyc; }
+        if(w.clmFrameSize<=0 && !wavFrameSizeFromName(path))
+            frame = wavRefineFrameSize(w.samples, frame);
+        if(!frame) frame=(int)w.samples.size();
+        int nf = (int)w.samples.size()/frame;
+        std::vector<float> d=w.samples;
+        if(!wavIsPow2(frame)||frame<32){ d=wavResampleFrames(d,nf,frame,2048); frame=2048; }
+        float hz = nf ? heardHz(d,frame,nf) : -1;
+        bool ok = hz>205 && hz<236;
+        if(!ok) bad++;
+        CHECK(ok, "%s -> frame %d, %d frames, %.1f Hz", c.name, frame, nf, hz);
+    }
+    
+    
+    (void) bad;
+}
+
 static void testAnalogTables()
 {
     printf("== analog tables ==\n");
@@ -472,6 +619,8 @@ int main()
     testLfoSampleAndHold();
     testLfoShapeOrder();
     testShortWavetables();
+    testShortFrameTables();
+    testWavFormats();
     testAnalogTables();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;

@@ -65,6 +65,11 @@ target_include_directories(tablor_hostlfo PRIVATE src src/host)
 target_link_libraries(tablor_hostlfo PRIVATE dl m)
 target_link_options(tablor_hostlfo PRIVATE ${TB_STATIC_LINK})
 
+add_executable(tablor_wtaudit tools/wtaudit.cpp)
+target_include_directories(tablor_wtaudit PRIVATE src src/ported)
+target_link_libraries(tablor_wtaudit PRIVATE m)
+target_link_options(tablor_wtaudit PRIVATE ${TB_STATIC_LINK})
+
 add_executable(tablor_render tools/render.cpp)
 target_include_directories(tablor_render PRIVATE src src/host)
 target_link_libraries(tablor_render PRIVATE dl m)

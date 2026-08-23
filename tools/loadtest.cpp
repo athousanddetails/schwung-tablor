@@ -315,9 +315,22 @@ int main(int argc, char **argv)
     n = api->get_param(inst, "ui_hierarchy", big, sizeof big);
     CHECK(n > 1000 && strstr(big, "\"levels\"") && strstr(big, "\"root\""),
           "ui_hierarchy served (%d bytes)", n);
-    CHECK(strstr(big, "\"list_param\":\"preset\"") &&
+    /* The fullscreen browser is deliberately gone -- the Preset page's enum
+     * cell is the loader. Assert the inverse so it cannot creep back. */
+    CHECK(!strstr(big, "\"list_param\"") &&
           strstr(big, "\"preset_name\"") && strstr(big, "\"string\""),
-          "hierarchy has native preset browser + keyboard rename");
+          "no browser level; Preset page cells declared");
+    /* Root must hold EXACTLY its 8 knobs. A 9th param spills into a "Main 2"
+     * continuation page carrying that one cell -- which is what putting
+     * Rename on root did, and it is pure noise between Main and the sections. */
+    {
+        const char *r = strstr(big, "\"root\"");
+        const char *end = r ? strstr(r, "\"knobs\"") : NULL;
+        int params = 0;
+        for (const char *c = r; c && end && c < end; c++)
+            if (!strncmp(c, "\"key\":", 6)) params++;
+        CHECK(params == 8, "root has exactly 8 params, so there is no Main 2 (%d)", params);
+    }
     n = api->get_param(inst, "chain_params", big, sizeof big);
     CHECK(strstr(big, "\"viz\"") && strstr(big, "\"group\":\"amp\"") &&
           strstr(big, "\"kind\":\"fader\""),
@@ -519,6 +532,69 @@ int main(int argc, char **argv)
         api->set_param(inst, "lfo1_depth", "0");
     }
 
+    /* AT BOOT, before anything is saved: the PRESET cell must already carry
+     * the factory presets as its options. It did not -- the boot job
+     * published the option lists BEFORE load_presets ran, so the cell read 0
+     * with nothing to step through. */
+    n = api->get_param(inst, "chain_params", big, sizeof big);
+    CHECK(strstr(big, "\"key\":\"preset\"") && strstr(big, "\"Init\"") &&
+          strstr(big, "\"Glass Bells\""),
+          "PRESET cell carries the factory presets at boot");
+
+    /* ---- the preset-page tap buttons ---- */
+    {
+        /* Saving a name that already exists is an OVERWRITE, not a second
+         * file. Deleting a leftover here would not help: the module's preset
+         * list is cached and only rescans when IT writes, so the count would
+         * still include the file we just removed. So ask the filesystem what
+         * to expect instead, and clean up at the end. */
+        const char *probe = "/data/UserData/UserLibrary/Tablor Presets/LT Probe.tblr";
+        struct stat pst;
+        const int fresh = (::stat(probe, &pst) == 0) ? 0 : 1;
+        api->get_param(inst, "preset_count", buf, sizeof buf);
+        int before = atoi(buf);
+        api->set_param(inst, "save_as", "LT Probe");    /* the keyboard commit */
+        settle(api, inst);
+        api->get_param(inst, "preset_count", buf, sizeof buf);
+        CHECK(atoi(buf) == before + fresh,
+              "SAVE AS %s (%d -> %s)",
+              fresh ? "makes a fresh preset" : "overwrites the same name",
+              before, buf);
+        const int afterSave = atoi(buf);
+        api->get_param(inst, "preset_name", buf, sizeof buf);
+        CHECK(!strcmp(buf, "LT Probe"),
+              "and it is named what was typed -> \"%s\"", buf);
+        /* the PRESET cell's options are the live list: the new name must be
+         * republished into the contract so turn/dive can reach it */
+        /* (the at-boot case is asserted earlier, before anything is saved) */
+        n = api->get_param(inst, "chain_params", big, sizeof big);
+        CHECK(strstr(big, "\"key\":\"preset\"") && strstr(big, "\"LT Probe\""),
+              "the PRESET cell's options include the just-saved preset");
+
+        api->set_param(inst, "save_as", "");            /* blank commit: no-op */
+        settle(api, inst);
+        api->get_param(inst, "preset_count", buf, sizeof buf);
+        CHECK(atoi(buf) == afterSave, "a blank Save As saves nothing");
+
+        api->get_param(inst, "preset", buf, sizeof buf);
+        int cur = atoi(buf);
+        int moved = 0;
+        for (int i = 0; i < 4 && !moved; i++) {
+            api->set_param(inst, "preset_rnd", "Random");
+            settle(api, inst);
+            api->get_param(inst, "preset", buf, sizeof buf);
+            if (atoi(buf) != cur) moved = 1;
+            cur = atoi(buf);
+        }
+        CHECK(moved, "RANDOM button lands on a different preset");
+        api->set_param(inst, "preset_rnd", "-");        /* idle: must be a no-op */
+        settle(api, inst);
+        api->get_param(inst, "preset", buf, sizeof buf);
+        CHECK(atoi(buf) == cur, "idle write does NOT fire the trigger");
+        api->set_param(inst, "preset", "0");
+        settle(api, inst);
+    }
+
     /* ---- a note-off must release its voice whatever mode we are in NOW ----
      * Reported from hardware as a note that keeps sounding until you play
      * more notes (which is voice STEALING, not a release). Flipping to Mono
@@ -599,8 +675,10 @@ int main(int argc, char **argv)
     settle(api, inst);
     api->get_param(inst, "preset_name", buf, sizeof buf);
     CHECK(!strncmp(buf, "Untitled", 8), "save new -> \"%s\"", buf);
+    /* relative to what was there a moment ago, not to the count at boot:
+     * the library is the user's and may already hold their own presets */
     api->get_param(inst, "preset_count", buf, sizeof buf);
-    CHECK(atoi(buf) == nPresets + 1, "preset_count grew to %s", buf);
+    CHECK(atoi(buf) >= nPresets + 1, "preset_count grew to %s", buf);
 
     api->set_param(inst, "preset_name", "LOADTEST SOUND");
     settle(api, inst);
@@ -637,6 +715,11 @@ int main(int argc, char **argv)
     remove("/data/UserData/UserLibrary/Tablor Presets/LOADTEST SOUND.tblr");
 
     api->set_param(inst, "preset", "0");
+
+    /* Clean up the probe preset LAST. Removing it mid-run desynced the
+     * module's cached preset list -- the file was gone but the count still
+     * included it, so a later assertion about the count failed. */
+    ::remove("/data/UserData/UserLibrary/Tablor Presets/LT Probe.tblr");
 
     api->destroy_instance(inst);
     dlclose(dl);

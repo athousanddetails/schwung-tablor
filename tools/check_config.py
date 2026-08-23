@@ -72,10 +72,18 @@ if m:
     chain_keys = {p["key"] for p in chain}
 
     # every movy_config key must exist in chain_params, and vice versa
+    # preset's options are published at runtime (the live preset list), so it
+    # is deliberately absent from the static contract.
+    DYNAMIC_KEYS = {"preset"}
     for k in seen_keys:
-        check(k in chain_keys, f"movy_config key {k} missing from chain_params")
+        check(k in chain_keys or k in DYNAMIC_KEYS,
+              f"movy_config key {k} missing from chain_params")
+    # Strings cannot be driven by a Movy encoder, so they are contract-only:
+    # save_as is the keyboard-backed Save As cell on the device and web.
+    MOVY_EXEMPT = {"save_as", "preset_name"}
     for k in chain_keys:
-        check(k in seen_keys, f"chain_params key {k} not on any movy page")
+        check(k in seen_keys or k in MOVY_EXEMPT,
+              f"chain_params key {k} not on any movy page")
 
     # types agree (movy 'file' pairs with schwung 'filepath')
     chain_types = {p["key"]: p["type"] for p in chain}
@@ -140,11 +148,12 @@ if m3:
     # The preset browser lives on ROOT (obxd pattern): that puts [Presets]
     # BEFORE Main in jog order, so a jog off Main goes to the sections
     # instead of straight back into the preset list.
-    rl = levels.get("root", {})
-    check(rl.get("list_param") == "preset" and rl.get("count_param") == "preset_count"
-          and rl.get("name_param") == "preset_name", "root declares the preset browser")
-    check(not any(l.get("list_param") for k, l in levels.items() if k != "root"),
-          "no second preset browser level (would add a stray Presets page)")
+    # The fullscreen browser is deliberately GONE: loading lives on the
+    # Preset page's enum cell (turn to step, dive for the list), which is
+    # what the user asked for after the browser cost a whole page. Guard the
+    # inverse now: nothing may quietly bring a browser page back.
+    check(not any(l.get("list_param") for l in levels.values()),
+          "no preset browser level (the Preset page's enum cell is the loader)")
     nav, hkeys = set(), set()
     for lid, lv in levels.items():
         for it in lv.get("params", []):

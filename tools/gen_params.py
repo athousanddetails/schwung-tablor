@@ -15,7 +15,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "1.0.7"
+VERSION = "1.0.10"
 
 # ---------------------------------------------------------------- enums
 FILTER_TYPES = ["LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24"]
@@ -183,7 +183,12 @@ for _line in (ROOT / "src" / "presets" / "factory.tbl").read_text().splitlines()
 PRESET_PAGE = dict(
     preset = hint(enum("preset", "PRST", "Preset", PRESET_NAMES, 0,
                        automatable=False), render="preset"),
-    save   = enum("save_preset", "SAVE", "Save Preset", ONOFF, 0,
+    # access:"write" is the 0.12+ trigger contract: the host renders these as
+    # buttons and FIRES them on a click, never scrubs them with a knob. The
+    # first option ("-", drawable in the 5x7 font) is the do-nothing spelling and can never be sent by the
+    # host (see MODULES.md on euclidrum's rnd_preset).
+
+    rnd    = enum("preset_rnd", "RAND", "Rnd Prst", ["-", "Random"], 0,
                   automatable=False, behavior="trigger"),
 )
 
@@ -207,7 +212,7 @@ BANKS = [
     # Movy/web keep a Preset page of their own (they have no native browser);
     # the stock UI uses the hierarchy's browser level instead.
     ("Preset", True, [
-        row(PRESET_PAGE["preset"]),
+        row(PRESET_PAGE["preset"], PRESET_PAGE["rnd"]),
     ]),
     ("Osc", False, [
         row(O1["table"], O2["table"], O1["pos"], O2["pos"],
@@ -243,8 +248,7 @@ BANKS = [
     ]),
     ("Global", True, [
         row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"], GLOBAL["gmode"],
-            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"],
-            PRESET_PAGE["save"]),
+            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
     ]),
 ]
 
@@ -264,7 +268,7 @@ def all_params():
 # macro. u{i} is a 0..127 pot; u{i}_target picks any parameter by name; the
 # DSP writes through (and back-syncs the pot when the target changes).
 BASE_PARAMS = all_params()
-NOT_TARGETS = {"preset", "save_preset"}
+NOT_TARGETS = {"preset", "preset_rnd"}
 USER_TARGETS = ["None"] + [p["full"] for p in BASE_PARAMS
                            if p["type"] != "file" and p["key"] not in NOT_TARGETS]
 
@@ -295,6 +299,8 @@ def movy_slot(p):
         s["automatable"] = False
     if p.get("behavior"):
         s["behavior"] = p["behavior"]
+        if p["behavior"] == "trigger":
+            s["access"] = "write"      # 0.12+ contract; behavior stays for Movy
     for k, v in p.get("_movy", {}).items():
         s[k] = v
     return s
@@ -303,7 +309,7 @@ def movy_slot(p):
 # bankGroups is one entry PER BANK but indexed PER PAGE, so a multi-row bank
 # shifts every following page label. One bank per page, named like ui_chain.
 MOVY_PAGE_NAMES = {
-    ("Preset", 0): "Preset",
+    ("Preset", 0): "Presets",
     ("Osc", 0): "Osc",    ("Osc", 1): "Unison",  ("Osc", 2): "Shape",
     ("Filter", 0): "Filter",
     ("Env", 0): "Env", ("Env", 1): "Env+",
@@ -351,7 +357,6 @@ VIZ = {
     "noise_level": {"kind": "fader"},
     "volume": {"kind": "fader"},
     "legato": {"kind": "switch"},
-    "save_preset": {"kind": "switch"},
     "m1_on": {"kind": "switch"}, "m2_on": {"kind": "switch"},
     "m3_on": {"kind": "switch"}, "m4_on": {"kind": "switch"},
 }
@@ -375,9 +380,29 @@ def chain_param(p):
              "min": p["min"], "max": p["max"], "default": p["default"]}
     if p["key"] in VIZ:
         d["viz"] = VIZ[p["key"]]
+    # access:"write" is what stops the host scrubbing a trigger with a knob.
+    # It was being emitted into the wrong builder, so the host treated SAVE
+    # as an ordinary enum and every detent of a turn fired it -- reported as
+    # one turn of the pot creating 29 preset files.
+    if p.get("behavior") == "trigger":
+        d["access"] = "write"
     return d
 
-chain = [chain_param(p) for p in PARAMS]
+# `preset` is dynamic: its options ARE the preset list, which changes on
+# every save -- so the module publishes it into the contract tail at runtime,
+# exactly like the wavetable enums. A static entry would duplicate the key.
+chain = [chain_param(p) for p in PARAMS if p["key"] != "preset"]
+# Save As: a STRING param, declared straight into the contract. Clicking its
+# cell opens the stock keyboard and the committed text is the new preset's
+# name -- saving and naming are one gesture. A string is opaque, so no knob
+# turn can ever fire it (the failure mode the trigger buttons had). It lives
+# only here and in the hierarchy: it is not a C-table param -- the DSP handles
+# the key directly, like preset_name.
+chain.append({"key": "save_as", "name": "Save", "type": "string",
+              "default": "", "automatable": False})
+# Rename: the existing preset_name key as a visible cell (keyboard on click).
+chain.append({"key": "preset_name", "name": "Rename", "type": "string",
+              "default": "", "automatable": False})
 chain_json = json.dumps(chain, separators=(",", ":"))
 assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"
 
@@ -387,7 +412,7 @@ assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim
 # NOTE: the module must NOT serve ui_hierarchy — the Shadow UI's hierarchy
 # editor takes precedence over ui_chain.js whenever a module offers one.
 PAGE_MAP = [  # (bank name, row index, page title). Section = bank name.
-    ("Preset", 0, "PRESET"),
+    ("Preset", 0, "PRESETS"),
     ("Osc",    0, "OSC"),
     ("Osc",    1, "UNISON"),
     ("Osc",    2, "SHAPE"),
@@ -516,14 +541,21 @@ def build_hierarchy():
     # comfortably above the libraries this ships against. wt_pack and the
     # wtN_table keys still exist and still stream -- the web UI drives both --
     # they simply have no cell on the Move.
-    root_params.append({"key": "preset_name", "name": "Rename", "type": "string"})
+    # The save page: tap-buttons plus Rename, first section after Main so
+    # saving is one jog away from the sound you just made.
     for lid, label in level_ids:
         root_params.append({"level": lid, "label": label})
+    # Preset management is the LAST page: it is where you go when the sound is
+    # finished, not something to page through on the way to the filter.
+    root_params.append({"level": "presetpg", "label": "Presets"})
+    # No list_param: the fullscreen browser page is gone. Loading lives on
+    # the Preset page's PRESET cell -- turn to step, dive for the full list.
     levels["root"] = {
         "name": "Tablor",
-        "list_param": "preset",
-        "count_param": "preset_count",
-        "name_param": "preset_name",
+        # Shift+click inside the preset browser saves the current sound as a
+        # new preset (the host writes "new" here) and opens the keyboard on
+        # name_param. Hosts without the gesture ignore this key.
+        "save_param": "save_preset",
         "params": root_params,
         "knobs": [sel_of.get(s["key"], s["key"]) for s in osc_row if s],
     }
@@ -533,6 +565,20 @@ def build_hierarchy():
     # only matters if the pack can be changed from the device, and it no
     # longer can. The web UI sets wt_pack directly.)
 
+    # No list_param: a level that declares one renders as a scrolling browser
+    # INSTEAD of its knobs (page_plan.mjs: "the browser takes priority"), and
+    # this page needs its four cells. PRESET is an enum whose options are the
+    # live preset list, so a turn steps presets and a dive opens the picker.
+    levels["presetpg"] = {
+        "name": "Presets",
+        "params": [
+            {"key": "preset",      "name": "Preset", "type": "enum"},
+            {"key": "save_as",     "name": "Save",   "type": "string"},
+            {"key": "preset_name", "name": "Rename", "type": "string"},
+            hier_param(PRESET_PAGE["rnd"]),
+        ],
+        "knobs": ["preset", "save_as", "preset_name", "preset_rnd"],
+    }
     return {"levels": levels}
 
 hierarchy_json = json.dumps(build_hierarchy(), separators=(",", ":"))
