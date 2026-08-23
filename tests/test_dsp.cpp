@@ -552,6 +552,48 @@ static void testWavFormats()
     (void) bad;
 }
 
+/* A real additive table that MUST NOT be "corrected".
+ *
+ * DigiAdd07 is 13824 samples of 16-bit PCM, no clm, and morphs from a full
+ * harmonic series to even harmonics only. Its later frames therefore consist
+ * of two identical half-cycles -- legitimately, because that is what an
+ * even-harmonics-only waveform looks like. Any detector that halves a frame
+ * on seeing repeated halves destroys this table: the EARLY frames are not
+ * repeated, so halving reads two different cycles as one.
+ *
+ * The distribution is what separates the two cases. A table whose real frame
+ * is half its apparent one repeats UNIFORMLY; this one grades smoothly from
+ * 1.91 down to 0.00 across its frames. wavRefineFrameSize requires the whole
+ * file to repeat, so it correctly leaves this alone. */
+static void testMorphToEvenHarmonicsKeepsItsFrame()
+{
+    printf("== a table morphing to even harmonics keeps its frame ==\n");
+    const int F = 512, N = 27;
+    std::vector<float> s((size_t) F * N);
+    for (int k = 0; k < N; k++) {
+        float m = (float) k / (N - 1);          /* 0 = all harmonics, 1 = even only */
+        for (int i = 0; i < F; i++) {
+            float u = (float) i / F, v = 0.0f;
+            for (int h = 1; h <= 16; h++) {
+                float amp = (h & 1) ? (1.0f - m) / h : 1.0f / h;
+                v += amp * std::sin(2.0f * (float) M_PI * h * u);
+            }
+            s[(size_t) k * F + i] = v * 0.4f;
+        }
+    }
+    int got = wavRefineFrameSize(s, 512);
+    CHECK(got == 512, "frames stay 512, not halved to 256 (got %d)", got);
+
+    /* and the genuine case still IS caught: every frame two identical halves */
+    std::vector<float> t((size_t) F * N);
+    for (int k = 0; k < N; k++)
+        for (int i = 0; i < F; i++)
+            t[(size_t) k * F + i] =
+                std::sin(2.0f * (float) M_PI * 2.0f * i / F) * 0.8f;   /* 2 cycles */
+    CHECK(wavRefineFrameSize(t, 512) == 256,
+          "a frame that really is two cycles still halves");
+}
+
 static void testAnalogTables()
 {
     printf("== analog tables ==\n");
@@ -621,6 +663,7 @@ int main()
     testShortWavetables();
     testShortFrameTables();
     testWavFormats();
+    testMorphToEvenHarmonicsKeepsItsFrame();
     testAnalogTables();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;

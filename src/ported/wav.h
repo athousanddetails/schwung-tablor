@@ -165,52 +165,66 @@ inline int wavFrameSizeFromName(const char *path)
     return v;
 }
 
-/* The inferred frame may itself be a RUN of shorter frames.
+/* HARMONIC ANALYSIS of the frame size: is this frame secretly two cycles?
  *
  * wavInferFrameSize takes the largest power of two that divides the file,
- * which is the right guess for the 2048-frame tables every tool exports. But
- * 16 frames of 256 is 4096 samples, and 2048 divides that too -- so it read
- * as 2 frames of 2048, each holding 8 cycles, and played 8x too high. That
- * is what "short wavetables sound wrong" is.
+ * which is right for the 2048-frame tables every tool exports. But 16 frames
+ * of 256 is 4096 samples, and 2048 divides that too -- so it read as 2 frames
+ * of 2048, each holding 8 cycles, and played EIGHT TIMES too high. That is
+ * what "shorter wavetables sound wrong" is.
  *
- * A short-frame table repeats at its true frame size ALL THE WAY THROUGH, so
- * that is what is tested: consecutive blocks of P samples across the whole
- * file, scale-invariant so a morphing table's drift does not sink the score.
- * A genuine 2048 table fails at every P -- consecutive 256-blocks of a
- * complex waveform look nothing alike -- while a 256 table passes, its
- * neighbours differing only slightly. The smallest P that passes is the true
- * period; testing upward from 32 finds it. */
+ * The test is exact, not a guess. Split a frame into halves a and b:
+ *
+ *     (a - b) / 2  is precisely the ODD-harmonic part of the waveform
+ *     (a + b) / 2  is precisely the EVEN-harmonic part
+ *
+ * because an odd harmonic inverts across half a period and an even one
+ * repeats. So a frame whose real period is half its length has ZERO odd
+ * harmonics -- not "similar halves", zero -- and the ratio of odd energy to
+ * total answers the question directly.
+ *
+ * EVERY frame must pass, and that is what protects real tables. An additive
+ * wavetable that morphs from a full harmonic series to even harmonics only
+ * (DigiAdd07 does exactly this) ends with frames that are two identical
+ * half-cycles, legitimately. Its early frames still carry odd harmonics, so
+ * the table as a whole is not halved -- while a table that really is short
+ * frames has no odd energy in ANY frame.
+ *
+ * Halving repeats: a 2048 frame holding 8 cycles passes three times down to
+ * 256.
+ */
 inline int wavRefineFrameSize(const std::vector<float> &s, int frameSize)
 {
     const int n = (int) s.size();
-    if (frameSize < 64 || n < frameSize * 2) return frameSize;
-    for (int p = 32; p < frameSize; p *= 2) {
-        if (n % p) continue;
-        int blocks = n / p;
-        if (blocks < 4) continue;
-        double sum = 0.0; int counted = 0;
-        for (int b = 0; b + 1 < blocks; b++) {
-            const float *a = &s[(size_t) b * p];
-            const float *c = &s[(size_t)(b + 1) * p];
-            double energy = 0, err = 0;
-            for (int i = 0; i < p; i++) {
-                energy += (double) a[i] * a[i];
-                double d = (double) a[i] - c[i];
-                err += d * d;
+    if (frameSize < 64 || n < frameSize) return frameSize;
+
+    int f = frameSize;
+    while (f >= 64 && (f & 1) == 0 && n / f >= 1) {
+        const int h = f / 2;
+        const int frames = n / f;
+        double worst = 0.0;
+        int judged = 0;
+        for (int k = 0; k < frames; k++) {
+            const float *a = &s[(size_t) k * f];
+            const float *b = a + h;
+            double odd = 0.0, even = 0.0;
+            for (int i = 0; i < h; i++) {
+                const double d = ((double) a[i] - b[i]) * 0.5;
+                const double m = ((double) a[i] + b[i]) * 0.5;
+                odd += d * d;
+                even += m * m;
             }
-            if (energy < 1e-9) continue;            /* silence proves nothing */
-            sum += err / energy;
-            counted++;
+            if (odd + even < 1e-12) continue;       /* a silent frame says nothing */
+            const double ratio = odd / (odd + even);
+            if (ratio > worst) worst = ratio;
+            judged++;
         }
-        /* ABSOLUTE sameness, not correlated shape. Correlation is trivially
-         * high for slow content -- adjacent 32-sample chunks of a 2048-period
-         * sine are the same little arc -- which read an 8-frame 2048 table as
-         * 512 frames of 32. Periodicity means the next block REPEATS this
-         * one, so the residual has to be small against the signal's own
-         * energy. 5% leaves room for the drift of a morphing table. */
-        if (counted >= 3 && sum / counted <= 0.05) return p;
+        /* 0.5% leaves room for quantisation -- a 16-bit file's noise floor is
+         * far below it -- while any real odd harmonic sits far above. */
+        if (!judged || worst > 0.005) break;
+        f = h;
     }
-    return frameSize;
+    return f;
 }
 
 inline int wavInferFrameSize(const WavData &w)

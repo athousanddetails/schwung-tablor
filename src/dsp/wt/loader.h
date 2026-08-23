@@ -197,9 +197,14 @@ private:
                 int cyc = wavDetectCycle(samples, (int) samples.size());
                 if (cyc > 0) frameSize = cyc;
             }
-            /* ...and a frame that is really a run of shorter frames. Only
-             * when nothing authoritative said otherwise. */
-            if (w.clmFrameSize <= 0 && !wavFrameSizeFromName(entry.path.c_str()))
+            /* ...and a frame that is really a run of shorter frames.
+             *
+             * CONTENT OUTRANKS THE NAME. A name is a claim, and a wrong one
+             * is easy to make -- call a 128 table "pad 2048.wav" and the
+             * claim is simply false. So the name only sets the starting
+             * guess; if the samples PROVE a shorter period, the samples win.
+             * Only a clm chunk is exempt, because a tool wrote it. */
+            if (w.clmFrameSize <= 0)
                 frameSize = wavRefineFrameSize(samples, frameSize);
             if (!frameSize) {
                 /* No power-of-two cycle divides the file. That is the normal
