@@ -60,6 +60,11 @@ target_link_libraries(tablor_enginebench PRIVATE m)
 target_link_options(tablor_enginebench PRIVATE ${TB_STATIC_LINK})
 
 # Wavetable switch probe (run on the Move).
+add_executable(tablor_hostlfo tools/hostlfo.cpp)
+target_include_directories(tablor_hostlfo PRIVATE src src/host)
+target_link_libraries(tablor_hostlfo PRIVATE dl m)
+target_link_options(tablor_hostlfo PRIVATE ${TB_STATIC_LINK})
+
 add_executable(tablor_render tools/render.cpp)
 target_include_directories(tablor_render PRIVATE src src/host)
 target_link_libraries(tablor_render PRIVATE dl m)
