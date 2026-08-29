@@ -65,6 +65,11 @@ target_include_directories(tablor_hostlfo PRIVATE src src/host)
 target_link_libraries(tablor_hostlfo PRIVATE dl m)
 target_link_options(tablor_hostlfo PRIVATE ${TB_STATIC_LINK})
 
+add_executable(tablor_dumpc tools/dumpc.cpp)
+target_include_directories(tablor_dumpc PRIVATE src src/host)
+target_link_libraries(tablor_dumpc PRIVATE dl m)
+target_link_options(tablor_dumpc PRIVATE ${TB_STATIC_LINK})
+
 add_executable(tablor_play tools/play.cpp)
 target_include_directories(tablor_play PRIVATE src src/host)
 target_link_libraries(tablor_play PRIVATE dl m)

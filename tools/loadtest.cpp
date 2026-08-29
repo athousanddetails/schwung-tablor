@@ -20,6 +20,7 @@
 #include <dlfcn.h>
 #include <ctime>
 #include <sys/stat.h>
+#include <initializer_list>
 #include <dirent.h>
 #include <sched.h>
 
@@ -318,6 +319,22 @@ int main(int argc, char **argv)
           "ui_hierarchy served (%d bytes)", n);
     /* The fullscreen browser is deliberately gone -- the Preset page's enum
      * cell is the loader. Assert the inverse so it cannot creep back. */
+    /* The data channels the web panel reads must declare what they ARE:
+     * read-only strings. They were an int with min==max==0, an invented way
+     * to say "no knob turns this" from before `access` existed -- which
+     * Schwung's own contract checker flags as an empty numeric range
+     * (athousanddetails/schwung-tablor#2). They stay on no page on purpose. */
+    n = api->get_param(inst, "chain_params", big, sizeof big);
+    for (const char *k : { "wt1_shape", "wt2_shape", "wt_paths" }) {
+        char pat[64]; snprintf(pat, sizeof pat, "\"key\":\"%s\"", k);
+        const char *at = strstr(big, pat);
+        CHECK(at && strstr(at, "\"type\":\"string\"") && strstr(at, "\"access\":\"read\"") &&
+              !strstr(at, "\"min\""),
+              "%s is a read-only string, not an int with an empty range", k);
+    }
+    /* put the hierarchy back in `big` -- the checks below read it from there */
+    n = api->get_param(inst, "ui_hierarchy", big, sizeof big);
+
     CHECK(!strstr(big, "\"list_param\"") &&
           strstr(big, "\"preset_name\"") && strstr(big, "\"string\""),
           "no browser level; Preset page cells declared");

@@ -467,12 +467,21 @@ static void tb_publish_selection(tablor_instance *inst)
     /* The shape digests are DECLARED here so they reach a browser at all:
      * schwung-manager only streams values for keys chain_params declares
      * (its standalone getParam answers from that cache and never asks the
-     * device), so an undeclared key reads as undefined forever. min==max
-     * marks them un-turnable; they live in no ui_hierarchy page, so no
-     * knob surface ever shows them -- they exist purely as a data channel. */
-    out += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}"
-           ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"int\",\"min\":0,\"max\":0}"
-           ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"int\",\"min\":0,\"max\":0}";
+     * device), so an undeclared key reads as undefined forever.
+     *
+     * They are STRINGS -- a shape digest reads "24,64,Wjvx..." and wt_paths
+     * is a path list -- and they are READ-ONLY, so that is what they now say.
+     * They were declared as an int with min==max==0, which was an invented
+     * way to mean "no knob can turn this" from before `access` existed. It
+     * described them wrongly twice over: not integers, and an empty numeric
+     * range is a defect in anything that really is a number, which is what
+     * Schwung's contract checker correctly flagged (issue #2).
+     *
+     * They remain on no ui_hierarchy page deliberately: they are a data
+     * channel for the web panel, not a control. */
+    out += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
+           ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
+           ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"string\",\"access\":\"read\"}";
     /* The PRESET cell: its options ARE the preset list, factory + user, so
      * the page's enum can step and dive through everything. Republished from
      * the worker whenever a save or rename changes the list. */
